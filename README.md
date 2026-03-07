@@ -12,47 +12,92 @@ Outputs a printable DOCX packing slip, tracks Chaos Club subscribers, and can au
 
 ## Setup Guide
 
-### 1. Create a Shopify App in Partner Dashboard
+> **Heads up on order of operations:** You need the Railway URL before you can finish configuring the Shopify app, but you need the Shopify API key before Railway can talk to Shopify. The trick is to create the Shopify app first (you'll get the key immediately), deploy to Railway second, then come back and paste the Railway URL into the Shopify app config.
 
-1. Go to [partners.shopify.com](https://partners.shopify.com) → **Apps** → **Create app** → **Custom app**
-2. Name it "Bundle Generator" (or whatever you like)
-3. Under **Configuration**, set:
-   - **App URL**: `https://your-railway-app.up.railway.app`
-   - **Allowed redirection URL**: `https://your-railway-app.up.railway.app/auth/callback`
-4. Under **API access**, ensure these scopes are requested:
-   - `read_products`, `write_inventory`, `read_inventory`
-   - `read_orders`, `read_all_orders`, `read_customers`
-5. Note your **API key** and **API secret key**
+---
+
+### 1. Create the Shopify App (Dev Dashboard)
+
+1. Go to [dev dashboard](https://shopify.dev/) and sign in with your Partner account
+2. Click **Apps** in the left sidebar → **Create app**
+3. On the "Create an app" screen, use the **Start from Dev Dashboard** panel on the right (not the CLI option)
+4. Type `Bundle Generator` in the App name field → click **Create**
+5. You'll land on your new app's overview page. Click **Configuration** in the left nav
+
+**In the Configuration tab:**
+
+6. Under **URLs**, set:
+   - **App URL**: `https://placeholder.up.railway.app` *(you'll replace this after Railway deploy)*
+   - **Allowed redirection URL**: `https://placeholder.up.railway.app/auth/callback` *(same — update later)*
+7. Click **Save** at the bottom
+
+**Add API scopes:**
+
+8. Still in Configuration, find the **API access** or **Scopes** section. Add the following:
+   ```
+   read_products
+   write_inventory
+   read_inventory
+   read_orders
+   read_all_orders
+   read_customers
+   ```
+9. Save again
+
+**Get your credentials:**
+
+10. Click **API credentials** (or **Overview**) in the left nav
+11. Copy your **Client ID** (API key) and **Client secret** — you'll need both for Railway
+
+---
 
 ### 2. Deploy to Railway
 
 1. Go to [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo**
 2. Select `pandorasdeckbox/shopify-random-bundle-generator`
-3. Railway will auto-detect the `Procfile` and deploy with `node server.js`
-4. Add a **PostgreSQL** plugin: click **+ New** → **Database** → **Add PostgreSQL**
-5. Set these environment variables in Railway's **Variables** tab:
+3. Railway will auto-detect the `Procfile` and start the build with `node server.js`
+4. Add a **PostgreSQL** database: in your project, click **+ New** → **Database** → **Add PostgreSQL**
+   - Railway will automatically inject `DATABASE_URL` into your app's environment
+5. Click on your app service → **Variables** tab → add the following:
 
 ```
-SHOPIFY_API_KEY=       your api key from Partner Dashboard
-SHOPIFY_API_SECRET=    your api secret from Partner Dashboard
-APP_URL=               https://your-railway-app.up.railway.app
-SHOPIFY_WEBHOOK_SECRET= same as SHOPIFY_API_SECRET
-NODE_ENV=production
+SHOPIFY_API_KEY=        (Client ID from step 1.11)
+SHOPIFY_API_SECRET=     (Client secret from step 1.11)
+APP_URL=                (your Railway URL, e.g. https://bundle-generator-production.up.railway.app)
+SHOPIFY_WEBHOOK_SECRET= (same value as SHOPIFY_API_SECRET)
+NODE_ENV=               production
 ```
 
-Railway sets `DATABASE_URL` automatically when you add the PostgreSQL plugin — you don't need to set that one.
+6. Once deployed, copy the Railway URL from the **Settings** tab (or from the generated domain shown in the service card)
 
-6. After deploy succeeds, copy your Railway URL and paste it back into the Shopify Partner Dashboard as the **App URL** and **redirect URL** (step 1.3 above)
+---
 
-### 3. Install the App on Your Store
+### 3. Update the Shopify App URLs
 
-1. In Partner Dashboard → **Apps** → your app → **Test on development store** (or use the install URL)
-2. Install URL format: `https://your-railway-app.up.railway.app/auth?shop=pandorasdeckbox.myshopify.com`
-3. Approve the permission request in Shopify admin
+Now that you have the real Railway URL, go back to the dev dashboard:
 
-### 4. Configure the App
+1. Dev dashboard → **Apps** → Bundle Generator → **Configuration**
+2. Update **App URL** to your real Railway URL: `https://your-actual-url.up.railway.app`
+3. Update **Allowed redirection URL** to: `https://your-actual-url.up.railway.app/auth/callback`
+4. Save
 
-Once installed, visit `https://your-railway-app.up.railway.app/app?shop=pandorasdeckbox.myshopify.com`
+---
+
+### 4. Install the App on Your Store
+
+1. Use this URL in your browser (replace with your actual values):
+   ```
+   https://your-railway-url.up.railway.app/auth?shop=pandorasdeckbox.myshopify.com
+   ```
+2. Shopify will show a permissions screen — click **Install**
+3. You'll be redirected back to the app UI
+
+> If you see an error about the redirect URI not matching, double-check step 3 above — the URL in Shopify's config must exactly match (no trailing slash, correct domain).
+
+### 5. Configure the App
+
+Once installed, the app UI should open automatically. If not, visit:
+`https://your-railway-url.up.railway.app/app?shop=pandorasdeckbox.myshopify.com`
 
 **Settings tab:**
 - Set subscription prices for 3 / 6 / 9 / 12-pack tiers
