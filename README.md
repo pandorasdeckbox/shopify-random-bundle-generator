@@ -39,7 +39,6 @@ Outputs a printable DOCX packing slip, tracks Chaos Club subscribers, and can au
    write_inventory
    read_inventory
    read_orders
-   read_all_orders
    read_customers
    ```
 9. Save again

@@ -72,7 +72,7 @@ const oauthStateStorage = new Map();
 const shopify = shopifyApi({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET,
-  scopes: ['read_products', 'write_inventory', 'read_inventory', 'read_orders', 'read_all_orders', 'read_customers'],
+  scopes: ['read_products', 'write_inventory', 'read_inventory', 'read_orders', 'read_customers'],
   hostName: process.env.APP_URL?.replace(/https?:\/\//, '') || 'localhost',
   hostScheme: 'https',
   apiVersion: ApiVersion.January24,
@@ -135,7 +135,7 @@ app.get('/auth', async (req, res) => {
 
     const authUrl = `https://${sanitizedShop}/admin/oauth/authorize?` + new URLSearchParams({
       client_id: process.env.SHOPIFY_API_KEY,
-      scope: 'read_products,write_inventory,read_inventory,read_orders,read_all_orders,read_customers',
+      scope: 'read_products,write_inventory,read_inventory,read_orders,read_customers',
       redirect_uri: `${process.env.APP_URL}/auth/callback`,
       state,
     }).toString();
