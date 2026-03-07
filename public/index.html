@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bundle Generator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f1a;
+      --surface: #1a1a2e;
+      --surface2: #16213e;
+      --accent: #e94560;
+      --accent2: #0f3460;
+      --text: #eaeaea;
+      --muted: #888;
+      --success: #2ecc71;
+      --warning: #f39c12;
+      --danger: #e74c3c;
+      --radius: 8px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
+
+    /* ── Header ── */
+    .header {
+      background: linear-gradient(135deg, var(--surface) 0%, var(--accent2) 100%);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border-bottom: 2px solid var(--accent);
+    }
+    .header h1 { font-size: 1.4rem; }
+    .header h1 span { color: var(--accent); }
+    .shop-name { margin-left: auto; font-size: 0.85rem; color: var(--muted); }
+
+    /* ── Tabs ── */
+    .tabs { display: flex; background: var(--surface); border-bottom: 2px solid var(--accent2); }
+    .tab-btn {
+      padding: 14px 24px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      border-bottom: 3px solid transparent;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+    /* ── Content ── */
+    .content { padding: 24px; max-width: 1100px; margin: 0 auto; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--accent2);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 { font-size: 1.1rem; margin-bottom: 16px; color: var(--accent); }
+    .card h3 { font-size: 0.95rem; margin-bottom: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    /* ── Form Elements ── */
+    .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    label { font-size: 0.85rem; color: var(--muted); font-weight: 500; }
+
+    input[type="text"], input[type="date"], input[type="number"], select, textarea {
+      background: var(--bg);
+      border: 1px solid var(--accent2);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      width: 100%;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    select option { background: var(--bg); }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn:hover { opacity: 0.88; }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-secondary { background: var(--accent2); color: #fff; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
+
+    /* ── Toggles ── */
+    .toggle-group { display: flex; flex-wrap: wrap; gap: 8px; }
+    .toggle-btn {
+      padding: 8px 18px;
+      border: 2px solid var(--accent2);
+      background: none;
+      color: var(--muted);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+    .toggle-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+    /* ── Switch ── */
+    .switch-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch-slider {
+      position: absolute; inset: 0; background: #444; border-radius: 24px; cursor: pointer; transition: 0.3s;
+    }
+    .switch-slider::before {
+      content: ''; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px;
+      background: #fff; border-radius: 50%; transition: 0.3s;
+    }
+    .switch input:checked + .switch-slider { background: var(--accent); }
+    .switch input:checked + .switch-slider::before { transform: translateX(20px); }
+    .switch-label { font-size: 0.9rem; }
+
+    /* ── Tables ── */
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    th { background: var(--surface2); text-align: left; padding: 10px 12px; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--accent2); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .table-wrap { overflow-x: auto; }
+
+    /* ── Badges ── */
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+    .badge-green { background: rgba(46,204,113,0.2); color: var(--success); }
+    .badge-yellow { background: rgba(243,156,18,0.2); color: var(--warning); }
+    .badge-red { background: rgba(231,76,60,0.2); color: var(--danger); }
+    .badge-blue { background: rgba(15,52,96,0.4); color: #7ab8f5; }
+
+    /* ── Result Panel ── */
+    #result-panel { display: none; }
+    .pack-list { list-style: none; }
+    .pack-item {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--accent2);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.9rem;
+    }
+    .pack-item:last-child { border-bottom: none; }
+    .pack-num { color: var(--muted); width: 28px; flex-shrink: 0; font-size: 0.8rem; }
+    .pack-name { flex: 1; }
+    .pack-collector { color: var(--warning); font-weight: 600; margin-left: auto; font-size: 0.8rem; }
+    .pack-price { color: var(--muted); font-size: 0.8rem; margin-left: 8px; }
+
+    .metrics-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+    .metric-box {
+      background: var(--surface2);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      text-align: center;
+    }
+    .metric-box .label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; }
+    .metric-box .value { font-size: 1.3rem; font-weight: 700; }
+    .metric-good { color: var(--success); }
+    .metric-warn { color: var(--warning); }
+
+    .d20-result {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      background: var(--surface2);
+      margin-bottom: 16px;
+    }
+    .d20-die { font-size: 2rem; }
+    .d20-roll { font-size: 2rem; font-weight: 900; }
+    .d20-roll.natural-20 { color: var(--accent); }
+    .d20-reason { font-size: 0.9rem; color: var(--muted); }
+
+    /* ── Product Config ── */
+    .product-filter { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; }
+    .product-filter input { flex: 1; }
+    .product-grid { display: grid; gap: 1px; }
+    .product-row {
+      display: grid;
+      grid-template-columns: 1fr 120px auto auto;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      background: var(--surface2);
+      border-radius: 4px;
+      margin-bottom: 1px;
+      font-size: 0.88rem;
+    }
+    .product-row:hover { background: rgba(255,255,255,0.04); }
+    .product-type { color: var(--muted); font-size: 0.8rem; }
+    .prod-check-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.83rem; white-space: nowrap; }
+    .prod-check-label input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
+    .collector-label { color: var(--warning); }
+
+    /* ── Status / Loading ── */
+    .loading { text-align: center; padding: 32px; color: var(--muted); }
+    .spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid var(--accent2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .alert { padding: 12px 16px; border-radius: var(--radius); margin-bottom: 16px; font-size: 0.9rem; }
+    .alert-success { background: rgba(46,204,113,0.15); border: 1px solid var(--success); color: var(--success); }
+    .alert-error { background: rgba(231,76,60,0.15); border: 1px solid var(--danger); color: var(--danger); }
+    .alert-info { background: rgba(15,52,96,0.4); border: 1px solid #0f3460; color: #7ab8f5; }
+    .alert-warning { background: rgba(243,156,18,0.15); border: 1px solid var(--warning); color: var(--warning); }
+
+    /* ── Settings Grid ── */
+    .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+
+    /* ── Subscriber Table ── */
+    .sub-notes { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 0.8rem; }
+    .action-btns { display: flex; gap: 6px; }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000; display: none;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--accent2);
+      border-radius: var(--radius); padding: 24px;
+      width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto;
+    }
+    .modal h2 { margin-bottom: 16px; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+    /* ── History ── */
+    .history-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--accent2);
+      font-size: 0.88rem;
+    }
+    .history-item:hover { background: rgba(255,255,255,0.02); }
+    .history-id { color: var(--muted); font-size: 0.8rem; width: 32px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>🎲 <span>Bundle</span> Generator</h1>
+  </div>
+  <div id="shop-badge" class="shop-name">Loading...</div>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('generate')">🎯 Generate</button>
+  <button class="tab-btn" onclick="switchTab('products')">📦 Products</button>
+  <button class="tab-btn" onclick="switchTab('settings')">⚙️ Settings</button>
+  <button class="tab-btn" onclick="switchTab('subscribers')">👥 Subscribers</button>
+  <button class="tab-btn" onclick="switchTab('history')">📋 History</button>
+</div>
+
+<div class="content">
+
+  <!-- ══════════════════════════════════════════════════════ GENERATE TAB -->
+  <div id="tab-generate" class="tab-panel active">
+
+    <div class="card">
+      <h2>Bundle Configuration</h2>
+
+      <!-- Bundle Type -->
+      <div class="form-group" style="margin-bottom:16px">
+        <label>Bundle Type</label>
+        <div class="toggle-group">
+          <button class="toggle-btn active" data-type="chaos_club" onclick="selectBundleType('chaos_club', this)">Chaos Club</button>
+          <button class="toggle-btn" data-type="draft_kit" onclick="selectBundleType('draft_kit', this)">Chaos Draft Kit</button>
+          <button class="toggle-btn" data-type="advent" onclick="selectBundleType('advent', this)">Advent Calendar</button>
+        </div>
+      </div>
+
+      <!-- Chaos Club: Pack Count -->
+      <div id="pack-count-section" class="form-group" style="margin-bottom:16px">
+        <label>Pack Count</label>
+        <div class="toggle-group">
+          <button class="toggle-btn" data-count="3" onclick="selectPackCount(3, this)">3 — $26</button>
+          <button class="toggle-btn active" data-count="6" onclick="selectPackCount(6, this)">6 — $43</button>
+          <button class="toggle-btn" data-count="9" onclick="selectPackCount(9, this)">9 — $59</button>
+          <button class="toggle-btn" data-count="12" onclick="selectPackCount(12, this)">12 — $74</button>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <!-- Customer Name / Subscriber -->
+        <div class="form-group">
+          <label>Subscriber (auto-fills name + history)</label>
+          <select id="subscriber-select" onchange="onSubscriberSelect()">
+            <option value="">— Walk-in / Manual —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Customer Name</label>
+          <input type="text" id="customer-name" placeholder="e.g. Tyler Esper">
+        </div>
+      </div>
+
+      <!-- D20 Section (Chaos Club only) -->
+      <div id="d20-section">
+        <div class="switch-row">
+          <label class="switch">
+            <input type="checkbox" id="d20-enabled" onchange="toggleD20()">
+            <span class="switch-slider"></span>
+          </label>
+          <span class="switch-label">🎲 Enable D20 Upgrade (roll for collector pack)</span>
+        </div>
+        <div id="d20-date-section" style="display:none; margin-bottom:12px;">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Last Upgrade Date (for luck protection)</label>
+              <input type="date" id="last-upgrade-date">
+            </div>
+            <div class="form-group">
+              <label>Months Since Last Upgrade</label>
+              <input type="text" id="months-since" readonly placeholder="auto-calculated" style="opacity:0.6">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dry Run -->
+      <div class="switch-row">
+        <label class="switch">
+          <input type="checkbox" id="dry-run" checked>
+          <span class="switch-slider"></span>
+        </label>
+        <span class="switch-label">🧪 Dry Run (simulate without updating inventory)</span>
+      </div>
+
+      <div id="gen-alert"></div>
+
+      <button class="btn btn-primary" id="generate-btn" onclick="generateBundle()" style="width:100%; margin-top:8px; padding:14px; font-size:1rem;">
+        ✨ Generate Bundle
+      </button>
+    </div>
+
+    <!-- Result Panel -->
+    <div id="result-panel" class="card">
+      <h2 id="result-title">Bundle Result</h2>
+
+      <div id="d20-display"></div>
+      <div id="dry-run-badge"></div>
+
+      <div class="metrics-row" id="metrics-display"></div>
+
+      <h3 style="margin: 16px 0 10px">Pack List</h3>
+      <ul id="pack-list" class="pack-list"></ul>
+
+      <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-success" id="download-btn" onclick="downloadDocx()">📄 Download Packing Slip (DOCX)</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('result-panel').style.display='none'">✕ Close</button>
+      </div>
+
+      <div id="inv-results" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ PRODUCTS TAB -->
+  <div id="tab-products" class="tab-panel">
+    <div class="card">
+      <h2>Product Configuration</h2>
+      <p style="color:var(--muted); margin-bottom:16px; font-size:0.9rem;">
+        Check which Shopify products are eligible for each bundle type. Changes auto-save when you click Save.
+      </p>
+      <div class="product-filter">
+        <input type="text" id="product-search" placeholder="Search products…" oninput="filterProducts()">
+        <button class="btn btn-secondary" onclick="loadProducts()">↺ Refresh</button>
+        <button class="btn btn-primary" onclick="saveProductSettings()">💾 Save</button>
+      </div>
+      <div id="products-loading" class="loading"><div class="spinner"></div><br>Loading products…</div>
+      <div id="product-grid" class="product-grid"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ SETTINGS TAB -->
+  <div id="tab-settings" class="tab-panel">
+    <div class="card">
+      <h2>Subscription Pricing</h2>
+      <p style="color:var(--muted); font-size:0.85rem; margin-bottom:14px;">Total price including shipping ($8)</p>
+      <div class="settings-grid">
+        <div class="form-group"><label>3-Pack Price ($)</label><input type="number" id="s-price-3" step="0.01"></div>
+        <div class="form-group"><label>6-Pack Price ($)</label><input type="number" id="s-price-6" step="0.01"></div>
+        <div class="form-group"><label>9-Pack Price ($)</label><input type="number" id="s-price-9" step="0.01"></div>
+        <div class="form-group"><label>12-Pack Price ($)</label><input type="number" id="s-price-12" step="0.01"></div>
+        <div class="form-group"><label>Advent Calendar Price ($)</label><input type="number" id="s-advent-price" step="0.01"></div>
+        <div class="form-group"><label>Chaos Draft Kit Price ($)</label><input type="number" id="s-draft-price" step="0.01"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Margin Targets</h2>
+      <div class="settings-grid">
+        <div class="form-group"><label>Minimum Margin %</label><input type="number" id="s-min-margin" step="1"></div>
+        <div class="form-group"><label>Ideal Margin %</label><input type="number" id="s-ideal-margin" step="1"></div>
+        <div class="form-group"><label>Advent Min Margin %</label><input type="number" id="s-advent-min" step="1"></div>
+        <div class="form-group"><label>Advent Ideal Margin %</label><input type="number" id="s-advent-ideal" step="1"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>D20 Upgrade System</h2>
+      <div class="settings-grid">
+        <div class="form-group"><label>Max Collector Price for Upgrade ($)</label><input type="number" id="s-max-collector" step="0.01"></div>
+        <div class="form-group"><label>Luck Protection (months)</label><input type="number" id="s-luck-months" step="1"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Subscription Webhook</h2>
+      <p style="color:var(--muted); font-size:0.85rem; margin-bottom:14px;">
+        Set the Shopify Product ID for your Chaos Club subscription product. When a renewal order is paid, 
+        a bundle will auto-generate and inventory will be decremented.
+      </p>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>Chaos Club Shopify Product GID</label>
+        <input type="text" id="s-chaos-product" placeholder="gid://shopify/Product/123456789">
+        <small style="color:var(--muted); margin-top:4px; display:block;">Find this in the URL when editing the product in Shopify Admin.</small>
+      </div>
+      <div id="webhook-alert"></div>
+      <button class="btn btn-secondary" onclick="registerWebhook()">🔗 Register orders/paid Webhook</button>
+    </div>
+
+    <div id="settings-alert"></div>
+    <button class="btn btn-primary" onclick="saveSettings()" style="padding:12px 32px;">💾 Save All Settings</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ SUBSCRIBERS TAB -->
+  <div id="tab-subscribers" class="tab-panel">
+    <div class="card" style="padding-bottom:0">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h2 style="margin:0">Chaos Club Subscribers</h2>
+        <button class="btn btn-primary btn-sm" onclick="openSubscriberModal()">+ Add Subscriber</button>
+      </div>
+      <div id="subscribers-loading" class="loading" style="display:none"><div class="spinner"></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Start Date</th>
+              <th>Packs</th>
+              <th>Months</th>
+              <th>Upgrades</th>
+              <th>Last Upgrade</th>
+              <th>Renewal Day</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="subscriber-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ HISTORY TAB -->
+  <div id="tab-history" class="tab-panel">
+    <div class="card" style="padding-bottom:0">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h2 style="margin:0">Bundle History</h2>
+        <button class="btn btn-secondary btn-sm" onclick="loadHistory()">↺ Refresh</button>
+      </div>
+      <div id="history-loading" class="loading" style="display:none"><div class="spinner"></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Customer</th>
+              <th>Packs</th>
+              <th>D20</th>
+              <th>Margin</th>
+              <th>Mode</th>
+              <th>DOCX</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /content -->
+
+<!-- ══════════════════════════════════════════════════════ SUBSCRIBER MODAL -->
+<div class="modal-overlay" id="sub-modal">
+  <div class="modal">
+    <h2 id="modal-title">Add Subscriber</h2>
+    <input type="hidden" id="modal-sub-id">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Name *</label>
+        <input type="text" id="m-name" placeholder="Full name">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="text" id="m-email" placeholder="customer@email.com">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Shopify Customer ID</label>
+        <input type="text" id="m-customer-id" placeholder="Numeric ID">
+      </div>
+      <div class="form-group">
+        <label>Contract ID</label>
+        <input type="text" id="m-contract-id" placeholder="From Subscriptions app">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Pack Count</label>
+        <select id="m-pack-count">
+          <option value="3">3</option>
+          <option value="6" selected>6</option>
+          <option value="9">9</option>
+          <option value="12">12</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Start Date</label>
+        <input type="date" id="m-start-date">
+      </div>
+      <div class="form-group">
+        <label>Renewal Day (1–31)</label>
+        <input type="number" id="m-renewal-day" min="1" max="31" placeholder="e.g. 25">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Months Renewed</label>
+        <input type="number" id="m-months" value="0" min="0">
+      </div>
+      <div class="form-group">
+        <label>Collector Upgrades (D20 hits)</label>
+        <input type="number" id="m-upgrades" value="0" min="0">
+      </div>
+      <div class="form-group">
+        <label>Last Upgrade Date</label>
+        <input type="date" id="m-last-upgrade">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Status</label>
+        <select id="m-status">
+          <option value="active">Active</option>
+          <option value="paused">Paused</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Notes</label>
+      <textarea id="m-notes" rows="2" placeholder="Internal notes…"></textarea>
+    </div>
+    <div id="modal-alert"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeSubscriberModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSubscriber()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+const SHOP = new URLSearchParams(location.search).get('shop') || '';
+let currentBundleType = 'chaos_club';
+let currentPackCount = 6;
+let currentBundleId = null;
+let allProducts = [];
+let currentSettings = {};
+let subscribers = [];
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+async function init() {
+  if (!SHOP) {
+    document.body.innerHTML = '<div style="padding:40px;text-align:center;color:#e94560;">Missing ?shop= parameter</div>';
+    return;
+  }
+  await Promise.all([loadShopInfo(), loadSettings()]);
+  loadSubscribersForDropdown();
+}
+
+async function loadShopInfo() {
+  try {
+    const data = await api('/api/shop');
+    document.getElementById('shop-badge').textContent = data.name || SHOP;
+  } catch(e) {
+    handleAuthError(e);
+  }
+}
+
+// ─── Tab Navigation ───────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+
+  if (name === 'products' && !allProducts.length) loadProducts();
+  if (name === 'subscribers') loadSubscribers();
+  if (name === 'history') loadHistory();
+}
+
+// ─── API Helper ───────────────────────────────────────────────────────────────
+async function api(url, opts = {}) {
+  const sep = url.includes('?') ? '&' : '?';
+  const r = await fetch(`${url}${sep}shop=${SHOP}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const data = await r.json().catch(() => ({ error: r.statusText }));
+  if (!r.ok) {
+    if (data.needsReauth) { window.location.href = `/auth?shop=${SHOP}`; }
+    throw new Error(data.error || 'API error');
+  }
+  return data;
+}
+
+function handleAuthError(e) {
+  if (e.message?.includes('needsReauth') || e.message?.includes('auth')) {
+    window.location.href = `/auth?shop=${SHOP}`;
+  }
+}
+
+function showAlert(containerId, msg, type = 'error') {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+  setTimeout(() => { if (el) el.innerHTML = ''; }, 6000);
+}
+
+// ─── Generate Tab ─────────────────────────────────────────────────────────────
+function selectBundleType(type, btn) {
+  currentBundleType = type;
+  document.querySelectorAll('[data-type]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('pack-count-section').style.display = type === 'chaos_club' ? '' : 'none';
+  document.getElementById('d20-section').style.display = type === 'chaos_club' ? '' : 'none';
+}
+
+function selectPackCount(n, btn) {
+  currentPackCount = n;
+  document.querySelectorAll('[data-count]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function toggleD20() {
+  const enabled = document.getElementById('d20-enabled').checked;
+  document.getElementById('d20-date-section').style.display = enabled ? 'block' : 'none';
+}
+
+document.getElementById('last-upgrade-date')?.addEventListener('change', function() {
+  if (!this.value) { document.getElementById('months-since').value = ''; return; }
+  const d = new Date(this.value);
+  const now = new Date();
+  const months = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
+  document.getElementById('months-since').value = `${months} months`;
+});
+
+async function loadSubscribersForDropdown() {
+  try {
+    const { subscribers: subs } = await api('/api/subscribers');
+    subscribers = subs || [];
+    const sel = document.getElementById('subscriber-select');
+    const active = subs.filter(s => s.status === 'active');
+    sel.innerHTML = '<option value="">— Walk-in / Manual —</option>' +
+      active.map(s => `<option value="${s.id}" data-pack="${s.pack_count}" data-upgrade="${s.last_upgrade_date||''}">${s.name} (${s.pack_count}-pack)</option>`).join('');
+  } catch(e) { /* silent fail */ }
+}
+
+function onSubscriberSelect() {
+  const sel = document.getElementById('subscriber-select');
+  const opt = sel.selectedOptions[0];
+  if (!opt || !opt.value) return;
+
+  const packCount = parseInt(opt.dataset.pack) || 6;
+  const lastUpgrade = opt.dataset.upgrade || '';
+
+  // Set customer name
+  const name = opt.text.split(' (')[0];
+  document.getElementById('customer-name').value = name;
+
+  // Set pack count
+  document.querySelectorAll('[data-count]').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.count) === packCount);
+  });
+  currentPackCount = packCount;
+
+  // Set last upgrade date if D20 enabled
+  if (lastUpgrade) {
+    document.getElementById('last-upgrade-date').value = lastUpgrade;
+    document.getElementById('last-upgrade-date').dispatchEvent(new Event('change'));
+  }
+}
+
+async function generateBundle() {
+  const btn = document.getElementById('generate-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Generating…';
+  document.getElementById('gen-alert').innerHTML = '';
+  document.getElementById('result-panel').style.display = 'none';
+
+  try {
+    const payload = {
+      bundle_type: currentBundleType,
+      pack_count: currentPackCount,
+      customer_name: document.getElementById('customer-name').value.trim() || undefined,
+      subscriber_id: document.getElementById('subscriber-select').value || undefined,
+      d20_enabled: document.getElementById('d20-enabled').checked,
+      last_upgrade_date: document.getElementById('last-upgrade-date').value || undefined,
+      dry_run: document.getElementById('dry-run').checked,
+    };
+
+    const result = await api('/api/generate', { method: 'POST', body: payload });
+    currentBundleId = result.bundle_id;
+    renderResult(result);
+
+    // Reload history & subscribers after generation
+    loadSubscribersForDropdown();
+  } catch(e) {
+    showAlert('gen-alert', e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ Generate Bundle';
+  }
+}
+
+function renderResult(r) {
+  document.getElementById('result-title').textContent =
+    `${r.bundle_type} — ${r.customer_name} (${r.dry_run ? 'DRY RUN' : 'LIVE'})`;
+
+  // D20
+  const d20El = document.getElementById('d20-display');
+  if (r.d20 && r.d20.roll) {
+    const isNat20 = r.d20.upgraded;
+    d20El.innerHTML = `
+      <div class="d20-result">
+        <div class="d20-die">🎲</div>
+        <div class="d20-roll ${isNat20 ? 'natural-20' : ''}">${r.d20.roll}</div>
+        <div>
+          <div style="font-weight:600">${isNat20 ? '⭐ UPGRADE!' : 'No upgrade'}</div>
+          <div class="d20-reason">${r.d20.reason}</div>
+          ${r.d20.upgraded ? `<div class="d20-reason" style="margin-top:4px">${r.d20.upgradedFrom} → ${r.d20.upgradedTo}</div>` : ''}
+        </div>
+      </div>`;
+  } else {
+    d20El.innerHTML = '';
+  }
+
+  // Dry run badge
+  document.getElementById('dry-run-badge').innerHTML = r.dry_run
+    ? '<div class="alert alert-warning" style="margin-bottom:12px">⚠️ DRY RUN — Inventory was NOT updated</div>'
+    : '<div class="alert alert-success" style="margin-bottom:12px">✅ LIVE — Inventory has been decremented</div>';
+
+  // Metrics
+  const m = r.metrics;
+  const marginPct = m.margin_percent.toFixed(1);
+  const marginClass = m.margin_percent >= 10 ? 'metric-good' : 'metric-warn';
+  document.getElementById('metrics-display').innerHTML = `
+    <div class="metric-box"><div class="label">Total Retail</div><div class="value">$${m.total_retail.toFixed(2)}</div></div>
+    <div class="metric-box"><div class="label">Target Price</div><div class="value">$${m.target_price.toFixed(2)}</div></div>
+    <div class="metric-box"><div class="label">Margin</div><div class="value ${marginClass}">${marginPct}%</div></div>`;
+
+  // Pack list
+  const collectorFirst = [...r.packs.filter(p => p.is_collector), ...r.packs.filter(p => !p.is_collector)];
+  document.getElementById('pack-list').innerHTML = collectorFirst.map((p, i) => {
+    const name = p.product_title + (p.variant_title ? ` – ${p.variant_title}` : '');
+    return `<li class="pack-item">
+      <span class="pack-num">${i + 1}.</span>
+      <span class="pack-name" ${p.is_collector ? 'style="font-weight:600"' : ''}>${name}</span>
+      ${p.is_collector ? '<span class="pack-collector">⭐ COLLECTOR</span>' : ''}
+      <span class="pack-price">$${p.price.toFixed(2)}</span>
+    </li>`;
+  }).join('');
+
+  // Inventory results
+  if (r.inventory_results?.length) {
+    document.getElementById('inv-results').innerHTML = `
+      <h3 style="margin-bottom:8px;">Inventory Updates</h3>
+      ${r.inventory_results.map(iv => `
+        <div style="font-size:0.82rem; padding:4px 0; color:${iv.success ? 'var(--success)' : 'var(--danger)'};">
+          ${iv.success ? '✅' : '❌'} ${iv.name}
+          ${iv.success && !iv.dryRun ? ` (${iv.from} → ${iv.to})` : ''}
+          ${iv.dryRun ? ' [dry run]' : ''}
+          ${iv.lowStock ? ' ⚠️ LOW STOCK' : ''}
+          ${!iv.success ? ` — ${iv.reason}` : ''}
+        </div>`).join('')}`;
+  }
+
+  document.getElementById('result-panel').style.display = 'block';
+  document.getElementById('result-panel').scrollIntoView({ behavior: 'smooth' });
+}
+
+function downloadDocx() {
+  if (!currentBundleId) return;
+  window.open(`/api/bundles/${currentBundleId}/docx?shop=${SHOP}`, '_blank');
+}
+
+// ─── Products Tab ─────────────────────────────────────────────────────────────
+async function loadProducts() {
+  document.getElementById('products-loading').style.display = 'block';
+  document.getElementById('product-grid').innerHTML = '';
+  try {
+    const [{ products }, { settings }] = await Promise.all([
+      api('/api/products'),
+      api('/api/settings'),
+    ]);
+    allProducts = products;
+    currentSettings = settings;
+    renderProductGrid(products, settings);
+  } catch(e) {
+    showAlert('gen-alert', 'Failed to load products: ' + e.message);
+  } finally {
+    document.getElementById('products-loading').style.display = 'none';
+  }
+}
+
+function renderProductGrid(products, settings) {
+  const grid = document.getElementById('product-grid');
+  grid.innerHTML = products.map(p => {
+    const isRegular = (settings.regular_pack_ids || []).includes(p.id);
+    const isCollector = (settings.collector_pack_ids || []).includes(p.id);
+    const stock = p.totalInventory ?? '?';
+    const price = parseFloat(p.priceRangeV2?.minVariantPrice?.amount || 0).toFixed(2);
+    const status = p.status === 'ACTIVE' ? '' : '<span class="badge badge-red">DRAFT</span>';
+    return `<div class="product-row" data-title="${p.title.toLowerCase()}" data-id="${p.id}">
+      <div>
+        <div style="font-weight:500">${p.title} ${status}</div>
+        <div class="product-type">${p.productType || 'No type'} · $${price} · ${stock} in stock</div>
+      </div>
+      <div></div>
+      <label class="prod-check-label">
+        <input type="checkbox" class="regular-check" data-id="${p.id}" ${isRegular ? 'checked' : ''}> Regular Pack
+      </label>
+      <label class="prod-check-label collector-label">
+        <input type="checkbox" class="collector-check" data-id="${p.id}" ${isCollector ? 'checked' : ''}> Collector Pack
+      </label>
+    </div>`;
+  }).join('');
+
+  // Mutual exclusion: regular ↔ collector
+  grid.querySelectorAll('.regular-check').forEach(cb => cb.addEventListener('change', () => {
+    if (cb.checked) {
+      const collCb = grid.querySelector(`.collector-check[data-id="${cb.dataset.id}"]`);
+      if (collCb) collCb.checked = false;
+    }
+  }));
+  grid.querySelectorAll('.collector-check').forEach(cb => cb.addEventListener('change', () => {
+    if (cb.checked) {
+      const regCb = grid.querySelector(`.regular-check[data-id="${cb.dataset.id}"]`);
+      if (regCb) regCb.checked = false;
+    }
+  }));
+}
+
+function filterProducts() {
+  const q = document.getElementById('product-search').value.toLowerCase();
+  document.querySelectorAll('.product-row').forEach(row => {
+    row.style.display = row.dataset.title.includes(q) ? '' : 'none';
+  });
+}
+
+async function saveProductSettings() {
+  const regularIds = [...document.querySelectorAll('.regular-check:checked')].map(cb => cb.dataset.id);
+  const collectorIds = [...document.querySelectorAll('.collector-check:checked')].map(cb => cb.dataset.id);
+
+  try {
+    await api('/api/settings', {
+      method: 'POST',
+      body: { settings: { regular_pack_ids: regularIds, collector_pack_ids: collectorIds } },
+    });
+    currentSettings.regular_pack_ids = regularIds;
+    currentSettings.collector_pack_ids = collectorIds;
+    showAlert('gen-alert', `✅ Saved: ${regularIds.length} regular packs, ${collectorIds.length} collector packs`, 'success');
+  } catch(e) {
+    showAlert('gen-alert', 'Save failed: ' + e.message);
+  }
+}
+
+// ─── Settings Tab ─────────────────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const { settings } = await api('/api/settings');
+    currentSettings = settings;
+    const s = settings;
+    document.getElementById('s-price-3').value = (s.subscription_pricing || {})[3] || 26;
+    document.getElementById('s-price-6').value = (s.subscription_pricing || {})[6] || 43;
+    document.getElementById('s-price-9').value = (s.subscription_pricing || {})[9] || 59;
+    document.getElementById('s-price-12').value = (s.subscription_pricing || {})[12] || 74;
+    document.getElementById('s-advent-price').value = s.advent_price || 199;
+    document.getElementById('s-draft-price').value = s.chaos_draft_price || 120;
+    document.getElementById('s-min-margin').value = s.min_margin_percent || 10;
+    document.getElementById('s-ideal-margin').value = s.ideal_margin_percent || 20;
+    document.getElementById('s-advent-min').value = s.advent_min_margin_percent || 15;
+    document.getElementById('s-advent-ideal').value = s.advent_ideal_margin_percent || 25;
+    document.getElementById('s-max-collector').value = s.collector_upgrade_max_price || 50;
+    document.getElementById('s-luck-months').value = s.luck_protection_months || 12;
+    document.getElementById('s-chaos-product').value = s.chaos_club_product_id || '';
+  } catch(e) { /* silent on init */ }
+}
+
+async function saveSettings() {
+  const pricing= {
+    3: parseFloat(document.getElementById('s-price-3').value),
+    6: parseFloat(document.getElementById('s-price-6').value),
+    9: parseFloat(document.getElementById('s-price-9').value),
+    12: parseFloat(document.getElementById('s-price-12').value),
+  };
+  const settings = {
+    ...currentSettings,
+    subscription_pricing: pricing,
+    advent_price: parseFloat(document.getElementById('s-advent-price').value),
+    chaos_draft_price: parseFloat(document.getElementById('s-draft-price').value),
+    min_margin_percent: parseFloat(document.getElementById('s-min-margin').value),
+    ideal_margin_percent: parseFloat(document.getElementById('s-ideal-margin').value),
+    advent_min_margin_percent: parseFloat(document.getElementById('s-advent-min').value),
+    advent_ideal_margin_percent: parseFloat(document.getElementById('s-advent-ideal').value),
+    collector_upgrade_max_price: parseFloat(document.getElementById('s-max-collector').value),
+    luck_protection_months: parseInt(document.getElementById('s-luck-months').value),
+    chaos_club_product_id: document.getElementById('s-chaos-product').value.trim(),
+  };
+
+  try {
+    await api('/api/settings', { method: 'POST', body: { settings } });
+    currentSettings = settings;
+    showAlert('settings-alert', '✅ Settings saved!', 'success');
+  } catch(e) {
+    showAlert('settings-alert', 'Save failed: ' + e.message);
+  }
+}
+
+async function registerWebhook() {
+  try {
+    const result = await api('/api/register-webhooks', { method: 'POST', body: {} });
+    showAlert('webhook-alert', '✅ ' + result.message, 'success');
+  } catch(e) {
+    showAlert('webhook-alert', 'Webhook registration failed: ' + e.message);
+  }
+}
+
+// ─── Subscribers Tab ──────────────────────────────────────────────────────────
+async function loadSubscribers() {
+  document.getElementById('subscribers-loading').style.display = 'block';
+  try {
+    const { subscribers: subs } = await api('/api/subscribers');
+    subscribers = subs || [];
+    renderSubscribers(subs);
+  } catch(e) {
+    showAlert('gen-alert', 'Failed to load subscribers: ' + e.message);
+  } finally {
+    document.getElementById('subscribers-loading').style.display = 'none';
+  }
+}
+
+function renderSubscribers(subs) {
+  const tbody = document.getElementById('subscriber-tbody');
+  if (!subs.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:32px;">No subscribers yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = subs.map(s => {
+    const statusClass = { active: 'badge-green', paused: 'badge-yellow', cancelled: 'badge-red' }[s.status] || 'badge-blue';
+    const startFmt = s.start_date ? new Date(s.start_date).toLocaleDateString() : '—';
+    const upgradeFmt = s.last_upgrade_date ? new Date(s.last_upgrade_date).toLocaleDateString() : '—';
+    const monthsSince = s.last_upgrade_date
+      ? (() => { const d = new Date(s.last_upgrade_date), n = new Date(); return (n.getFullYear()-d.getFullYear())*12+(n.getMonth()-d.getMonth()); })()
+      : '-';
+    return `<tr>
+      <td><strong>${s.name}</strong><br><span style="color:var(--muted);font-size:0.78rem">${s.email||''}</span></td>
+      <td>${startFmt}</td>
+      <td>${s.pack_count}</td>
+      <td>${s.months_renewed}</td>
+      <td>${s.collector_upgrade_count} <span style="color:var(--muted);font-size:0.78rem">(${monthsSince} mo ago)</span></td>
+      <td style="font-size:0.85rem">${upgradeFmt}</td>
+      <td>${s.renewal_day ? s.renewal_day + (s.renewal_day===1?'st':s.renewal_day===2?'nd':s.renewal_day===3?'rd':'th') : '—'}</td>
+      <td><span class="badge ${statusClass}">${s.status}</span></td>
+      <td><div class="action-btns">
+        <button class="btn btn-secondary btn-sm" onclick="openSubscriberModal(${s.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSubscriber(${s.id}, '${s.name}')">Del</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function openSubscriberModal(id) {
+  const modal = document.getElementById('sub-modal');
+  document.getElementById('modal-alert').innerHTML = '';
+
+  if (id) {
+    const s = subscribers.find(s => s.id === id);
+    if (!s) return;
+    document.getElementById('modal-title').textContent = 'Edit Subscriber';
+    document.getElementById('modal-sub-id').value = id;
+    document.getElementById('m-name').value = s.name || '';
+    document.getElementById('m-email').value = s.email || '';
+    document.getElementById('m-customer-id').value = s.shopify_customer_id || '';
+    document.getElementById('m-contract-id').value = s.contract_id || '';
+    document.getElementById('m-pack-count').value = s.pack_count || 6;
+    document.getElementById('m-start-date').value = s.start_date ? s.start_date.slice(0, 10) : '';
+    document.getElementById('m-renewal-day').value = s.renewal_day || '';
+    document.getElementById('m-months').value = s.months_renewed || 0;
+    document.getElementById('m-upgrades').value = s.collector_upgrade_count || 0;
+    document.getElementById('m-last-upgrade').value = s.last_upgrade_date ? s.last_upgrade_date.slice(0, 10) : '';
+    document.getElementById('m-status').value = s.status || 'active';
+    document.getElementById('m-notes').value = s.notes || '';
+  } else {
+    document.getElementById('modal-title').textContent = 'Add Subscriber';
+    document.getElementById('modal-sub-id').value = '';
+    ['m-name','m-email','m-customer-id','m-contract-id','m-start-date','m-renewal-day','m-last-upgrade','m-notes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('m-pack-count').value = 6;
+    document.getElementById('m-months').value = 0;
+    document.getElementById('m-upgrades').value = 0;
+    document.getElementById('m-status').value = 'active';
+  }
+
+  modal.classList.add('open');
+}
+
+function closeSubscriberModal() {
+  document.getElementById('sub-modal').classList.remove('open');
+}
+
+async function saveSubscriber() {
+  const name = document.getElementById('m-name').value.trim();
+  if (!name) { showAlert('modal-alert', 'Name is required', 'error'); return; }
+
+  const id = document.getElementById('modal-sub-id').value;
+  const payload = {
+    name,
+    email: document.getElementById('m-email').value.trim() || null,
+    shopify_customer_id: document.getElementById('m-customer-id').value.trim() || null,
+    contract_id: document.getElementById('m-contract-id').value.trim() || null,
+    pack_count: parseInt(document.getElementById('m-pack-count').value),
+    start_date: document.getElementById('m-start-date').value || null,
+    renewal_day: parseInt(document.getElementById('m-renewal-day').value) || null,
+    months_renewed: parseInt(document.getElementById('m-months').value) || 0,
+    collector_upgrade_count: parseInt(document.getElementById('m-upgrades').value) || 0,
+    last_upgrade_date: document.getElementById('m-last-upgrade').value || null,
+    status: document.getElementById('m-status').value,
+    notes: document.getElementById('m-notes').value.trim() || null,
+  };
+
+  try {
+    if (id) {
+      await api(`/api/subscribers/${id}`, { method: 'PUT', body: payload });
+    } else {
+      await api('/api/subscribers', { method: 'POST', body: payload });
+    }
+    closeSubscriberModal();
+    loadSubscribers();
+    loadSubscribersForDropdown();
+  } catch(e) {
+    showAlert('modal-alert', 'Save failed: ' + e.message);
+  }
+}
+
+async function deleteSubscriber(id, name) {
+  if (!confirm(`Delete subscriber "${name}"? This cannot be undone.`)) return;
+  try {
+    await api(`/api/subscribers/${id}`, { method: 'DELETE', body: {} });
+    loadSubscribers();
+    loadSubscribersForDropdown();
+  } catch(e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+// ─── History Tab ──────────────────────────────────────────────────────────────
+async function loadHistory() {
+  document.getElementById('history-loading').style.display = 'block';
+  try {
+    const { bundles } = await api('/api/bundles');
+    renderHistory(bundles);
+  } catch(e) {
+    console.error('History error:', e);
+  } finally {
+    document.getElementById('history-loading').style.display = 'none';
+  }
+}
+
+function renderHistory(bundles) {
+  const tbody = document.getElementById('history-tbody');
+  if (!bundles.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:32px;">No bundles generated yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = bundles.map(b => {
+    const date = new Date(b.created_at).toLocaleString();
+    const d20Cell = b.d20_roll
+      ? `<span style="font-weight:700;color:${b.d20_upgraded?'var(--accent)':'var(--muted)'}">${b.d20_roll}${b.d20_upgraded?' ⭐':''}</span>`
+      : '—';
+    const margin = parseFloat(b.margin_percent);
+    const marginColor = margin >= 10 ? 'var(--success)' : 'var(--warning)';
+    const isLive = !(b.dry_run === true || b.dry_run === 1);
+    return `<tr>
+      <td style="color:var(--muted);font-size:0.8rem">#${b.id}</td>
+      <td style="font-size:0.82rem">${date}</td>
+      <td><span class="badge badge-blue">${b.bundle_type}</span></td>
+      <td>${b.customer_name || '—'}</td>
+      <td>${b.pack_count}</td>
+      <td>${d20Cell}</td>
+      <td style="color:${marginColor};font-weight:600">${margin.toFixed(1)}%</td>
+      <td><span class="badge ${isLive ? 'badge-green' : 'badge-yellow'}">${isLive ? 'Live' : 'Dry Run'}</span></td>
+      <td><button class="btn btn-secondary btn-sm" onclick="downloadById(${b.id})">📄</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function downloadById(id) {
+  window.open(`/api/bundles/${id}/docx?shop=${SHOP}`, '_blank');
+}
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
