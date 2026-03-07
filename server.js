@@ -55,6 +55,16 @@ const __dirname = path.dirname(__filename);
 
 // ─── Init DB first, then everything else ─────────────────────────────────────
 
+// ─── Startup env var check ──────────────────────────────────────────────────
+
+const REQUIRED_ENV = ['SHOPIFY_API_KEY', 'SHOPIFY_API_SECRET', 'APP_URL'];
+const missing = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missing.length) {
+  console.error(`\n❌ Missing required environment variables: ${missing.join(', ')}`);
+  console.error('   Set these in Railway → your service → Variables, then redeploy.\n');
+  process.exit(1);
+}
+
 await initDatabase();
 
 // db.js exports sessionStorage after initDatabase() populates it
