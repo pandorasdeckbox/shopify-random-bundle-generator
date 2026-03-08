@@ -777,7 +777,7 @@ Collector packs are sorted to the top of the list automatically.</pre>
     <div id="modal-alert"></div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeSubscriberModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveSubscriber()">Save</button>
+      <button id="subscriber-save-btn" class="btn btn-primary" onclick="saveSubscriber()">Save</button>
     </div>
   </div>
 </div>
@@ -924,7 +924,7 @@ Collector packs are sorted to the top of the list automatically.</pre>
     <div id="potm-modal-alert"></div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closePotmModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="savePotmSubscriber()">Save</button>
+      <button id="potm-save-btn" class="btn btn-primary" onclick="savePotmSubscriber()">Save</button>
     </div>
   </div>
 </div>
@@ -1567,6 +1567,9 @@ async function saveSubscriber() {
   const name = document.getElementById('m-name').value.trim();
   if (!name) { showAlert('modal-alert', 'Name is required', 'error'); return; }
 
+  const btn = document.getElementById('subscriber-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+
   const id = document.getElementById('modal-sub-id').value;
   const payload = {
     name,
@@ -1594,6 +1597,7 @@ async function saveSubscriber() {
     loadSubscribersForDropdown();
   } catch(e) {
     showAlert('modal-alert', 'Save failed: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Save';
   }
 }
 
@@ -1695,6 +1699,9 @@ async function savePotmSubscriber() {
   const name = document.getElementById('pm-name').value.trim();
   if (!name) { showAlert('potm-modal-alert', 'Name is required', 'error'); return; }
 
+  const btn = document.getElementById('potm-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+
   const id = document.getElementById('potm-modal-id').value;
   const payload = {
     name,
@@ -1719,6 +1726,7 @@ async function savePotmSubscriber() {
     loadPotmSubscribers();
   } catch(e) {
     showAlert('potm-modal-alert', 'Save failed: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Save';
   }
 }
 
