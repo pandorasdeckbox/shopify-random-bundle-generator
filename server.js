@@ -37,6 +37,12 @@ import {
   saveDOCXTemplate,
   getDOCXTemplate,
   deleteDOCXTemplate,
+  getPotmSubscribers,
+  getPotmSubscriber,
+  getPotmSubscriberByCustomerId,
+  createPotmSubscriber,
+  updatePotmSubscriber,
+  deletePotmSubscriber,
 } from './database.js';
 
 import {
@@ -768,6 +774,146 @@ app.post('/api/subscribers/import', verifySession, async (req, res) => {
   }
 });
 
+// ─── API: POTM Subscribers ────────────────────────────────────────────────────
+
+app.get('/api/potm/subscribers', verifySession, async (req, res) => {
+  try {
+    const subs = await getPotmSubscribers(req.shopifySession.shop);
+    res.json({ subscribers: subs });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch POTM subscribers' });
+  }
+});
+
+app.post('/api/potm/subscribers', verifySession, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const sub = await createPotmSubscriber(req.shopifySession.shop, req.body);
+    res.json({ subscriber: sub });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create POTM subscriber: ' + err.message });
+  }
+});
+
+app.put('/api/potm/subscribers/:id', verifySession, async (req, res) => {
+  try {
+    const sub = await updatePotmSubscriber(req.shopifySession.shop, req.params.id, req.body);
+    if (!sub) return res.status(404).json({ error: 'POTM subscriber not found' });
+    res.json({ subscriber: sub });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update POTM subscriber: ' + err.message });
+  }
+});
+
+app.delete('/api/potm/subscribers/:id', verifySession, async (req, res) => {
+  try {
+    await deletePotmSubscriber(req.shopifySession.shop, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete POTM subscriber: ' + err.message });
+  }
+});
+
+// ─── API: POTM Import Preview ─────────────────────────────────────────────────
+
+app.get('/api/potm/subscribers/import-preview', verifySession, async (req, res) => {
+  try {
+    const shop = req.shopifySession.shop;
+    const settings = await getSettings(shop);
+    const potmProductId = req.query.product_gid || settings.potm_product_id;
+    if (!potmProductId) return res.status(400).json({ error: 'No POTM product selected.' });
+
+    const numericId = String(potmProductId).split('/').pop();
+    const client = new shopify.clients.Rest({ session: req.shopifySession });
+    const orderMap = new Map();
+
+    let sinceId = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const response = await client.get({
+        path: 'orders',
+        query: { limit: 250, status: 'any', created_at_min: '2018-01-01T00:00:00Z', since_id: sinceId, fields: 'id,created_at,customer,line_items' },
+      });
+      const orders = response.body.orders || [];
+
+      for (const order of orders) {
+        if (!order.customer) continue;
+        const lineItem = (order.line_items || []).find(li => String(li.product_id) === numericId);
+        if (!lineItem) continue;
+
+        const custId = String(order.customer.id);
+        const orderDate = new Date(order.created_at);
+
+        if (!orderMap.has(custId)) {
+          orderMap.set(custId, {
+            shopify_customer_id: custId,
+            name: `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() || `Customer ${custId}`,
+            email: order.customer.email || null,
+            first_order_date: order.created_at,
+            months_renewed: 1,
+          });
+        } else {
+          const existing = orderMap.get(custId);
+          existing.months_renewed += 1;
+          if (orderDate < new Date(existing.first_order_date)) existing.first_order_date = order.created_at;
+        }
+      }
+
+      if (orders.length === 250) sinceId = orders[orders.length - 1].id;
+      else hasMore = false;
+    }
+
+    const existingSubs = await getPotmSubscribers(shop);
+    const existingIds = new Set(existingSubs.map(s => String(s.shopify_customer_id)).filter(Boolean));
+
+    const candidates = Array.from(orderMap.values())
+      .map(c => ({ ...c, already_exists: existingIds.has(c.shopify_customer_id) }))
+      .sort((a, b) => { if (a.already_exists !== b.already_exists) return a.already_exists ? 1 : -1; return a.name.localeCompare(b.name); });
+
+    res.json({ candidates });
+  } catch (err) {
+    console.error('POTM import preview error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch order history: ' + err.message });
+  }
+});
+
+// ─── API: POTM Import Confirm ─────────────────────────────────────────────────
+
+app.post('/api/potm/subscribers/import', verifySession, async (req, res) => {
+  try {
+    const shop = req.shopifySession.shop;
+    const { candidates } = req.body;
+    if (!Array.isArray(candidates) || !candidates.length || candidates.length > 500) {
+      return res.status(400).json({ error: 'No candidates provided' });
+    }
+
+    const existingSubs = await getPotmSubscribers(shop);
+    const existingIds = new Set(existingSubs.map(s => String(s.shopify_customer_id)).filter(Boolean));
+
+    let imported = 0, skipped = 0;
+    for (const c of candidates) {
+      if (existingIds.has(String(c.shopify_customer_id))) { skipped++; continue; }
+      await createPotmSubscriber(shop, {
+        name: c.name,
+        email: c.email || null,
+        shopify_customer_id: c.shopify_customer_id,
+        start_date: c.first_order_date ? c.first_order_date.slice(0, 10) : null,
+        months_renewed: c.months_renewed || 0,
+        collector_upgrade_count: 0,
+        last_upgrade_date: null,
+        status: 'active',
+      });
+      imported++;
+    }
+
+    res.json({ imported, skipped });
+  } catch (err) {
+    console.error('POTM import error:', err.message);
+    res.status(500).json({ error: 'Import failed: ' + err.message });
+  }
+});
+
 // ─── API: Register Webhooks ───────────────────────────────────────────────────
 
 app.post('/api/register-webhooks', verifySession, async (req, res) => {
@@ -838,86 +984,113 @@ app.post('/webhooks/orders-paid', async (req, res) => {
     console.log(`📦 Webhook: orders/paid — Order ${order.name} for ${shop}`);
 
     const settings = await getSettings(shop);
-    const chaosProductId = settings.chaos_club_product_id;
-    if (!chaosProductId) return; // Not configured yet
-
-    // Check if this order contains the Chaos Club subscription product
     const lineItems = order.line_items || [];
-    const chaosItem = lineItems.find(item => {
-      const gid = `gid://shopify/Product/${item.product_id}`;
-      return gid === chaosProductId || String(item.product_id) === String(chaosProductId).split('/').pop();
-    });
 
-    if (!chaosItem) return;
+    const matchesProduct = (productId, configuredGid) => {
+      if (!configuredGid) return false;
+      const gid = `gid://shopify/Product/${productId}`;
+      return gid === configuredGid || String(productId) === String(configuredGid).split('/').pop();
+    };
 
-    console.log(`🎲 Chaos Club renewal detected for customer ${order.customer?.id}`);
+    // ── Chaos Club branch ──────────────────────────────────────────────────
+    const chaosItem = lineItems.find(item => matchesProduct(item.product_id, settings.chaos_club_product_id));
+    if (chaosItem) {
+      console.log(`🎲 Chaos Club renewal detected for customer ${order.customer?.id}`);
 
-    // Look up subscriber
-    const session = await sessionStorage.loadSession(`offline_${shop}`);
-    if (!session) {
-      console.error('No session found for shop', shop);
-      return;
-    }
+      const session = await sessionStorage.loadSession(`offline_${shop}`);
+      if (!session) { console.error('No session found for shop', shop); return; }
 
-    const subscriber = order.customer?.id
-      ? await getSubscriberByCustomerId(shop, String(order.customer.id))
-      : null;
+      const subscriber = order.customer?.id
+        ? await getSubscriberByCustomerId(shop, String(order.customer.id))
+        : null;
 
-    const packCount = subscriber?.pack_count || chaosItem.quantity || 3;
-    const settings2 = await getSettings(shop);
+      const packCount = subscriber?.pack_count || chaosItem.quantity || 3;
 
-    const { regular, collector } = await fetchBundleProducts(
-      new shopify.clients.Graphql({ session }),
-      settings2.regular_pack_ids || [],
-      settings2.collector_pack_ids || []
-    );
+      const { regular, collector } = await fetchBundleProducts(
+        new shopify.clients.Graphql({ session }),
+        settings.regular_pack_ids || [],
+        settings.collector_pack_ids || []
+      );
 
-    if (!regular.length) {
-      console.warn('No regular packs configured — skipping auto-generation');
-      return;
-    }
+      if (!regular.length) { console.warn('No regular packs configured — skipping auto-generation'); return; }
 
-    const result = generateSubscriptionBundle(regular, collector, packCount, settings2, {
-      enabled: true,
-      lastUpgradeDate: subscriber?.last_upgrade_date || null,
-    });
-
-    if (!result) {
-      console.warn('Could not generate auto bundle for', order.name);
-      return;
-    }
-
-    // Update inventory for real
-    await updateInventory(shopify, session, result.packs, false);
-
-    const d20 = result.d20Result;
-    const saved = await saveBundleHistory(shop, {
-      subscriber_id: subscriber?.id || null,
-      bundle_type: 'Chaos Club',
-      customer_name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}`.trim() : 'Subscriber',
-      pack_count: result.packs.length,
-      total_cost: result.metrics.total_cost,
-      total_retail: result.metrics.total_retail,
-      target_price: result.metrics.target_price,
-      margin_percent: result.metrics.margin_percent,
-      d20_roll: d20?.roll || null,
-      d20_upgraded: d20?.upgraded || false,
-      packs: result.packs,
-      dry_run: false,
-    });
-
-    if (subscriber) {
-      await updateSubscriber(shop, subscriber.id, {
-        ...subscriber,
-        months_renewed: (subscriber.months_renewed || 0) + 1,
-        ...(d20?.upgraded ? {
-          collector_upgrade_count: (subscriber.collector_upgrade_count || 0) + 1,
-          last_upgrade_date: new Date().toISOString().slice(0, 10),
-        } : {}),
+      const result = generateSubscriptionBundle(regular, collector, packCount, settings, {
+        enabled: true,
+        lastUpgradeDate: subscriber?.last_upgrade_date || null,
       });
+
+      if (!result) { console.warn('Could not generate auto bundle for', order.name); return; }
+
+      await updateInventory(shopify, session, result.packs, false);
+
+      const d20 = result.d20Result;
+      const saved = await saveBundleHistory(shop, {
+        subscriber_id: subscriber?.id || null,
+        bundle_type: 'Chaos Club',
+        customer_name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}`.trim() : 'Subscriber',
+        pack_count: result.packs.length,
+        total_cost: result.metrics.total_cost,
+        total_retail: result.metrics.total_retail,
+        target_price: result.metrics.target_price,
+        margin_percent: result.metrics.margin_percent,
+        d20_roll: d20?.roll || null,
+        d20_upgraded: d20?.upgraded || false,
+        packs: result.packs,
+        dry_run: false,
+      });
+
+      if (subscriber) {
+        await updateSubscriber(shop, subscriber.id, {
+          ...subscriber,
+          months_renewed: (subscriber.months_renewed || 0) + 1,
+          ...(d20?.upgraded ? {
+            collector_upgrade_count: (subscriber.collector_upgrade_count || 0) + 1,
+            last_upgrade_date: new Date().toISOString().slice(0, 10),
+          } : {}),
+        });
+      }
+
+      console.log(`✅ Auto-generated bundle #${saved.id} for Order ${order.name} (${d20?.upgraded ? '🎲 D20 upgrade!' : 'no upgrade'})`);
     }
 
-    console.log(`✅ Auto-generated bundle #${saved.id} for Order ${order.name} (${d20?.upgraded ? '🎲 D20 upgrade!' : 'no upgrade'})`);
+    // ── Pack of the Month branch ───────────────────────────────────────────
+    const potmItem = lineItems.find(item => matchesProduct(item.product_id, settings.potm_product_id));
+    if (potmItem) {
+      console.log(`🎴 Pack of the Month renewal detected for customer ${order.customer?.id}`);
+
+      const upgradeInterval = settings.potm_upgrade_interval_months || 6;
+      const subscriber = order.customer?.id
+        ? await getPotmSubscriberByCustomerId(shop, String(order.customer.id))
+        : null;
+
+      const newMonths = (subscriber?.months_renewed || 0) + 1;
+      const hitUpgrade = newMonths > 0 && newMonths % upgradeInterval === 0;
+
+      if (subscriber) {
+        await updatePotmSubscriber(shop, subscriber.id, {
+          ...subscriber,
+          months_renewed: newMonths,
+          ...(hitUpgrade ? {
+            collector_upgrade_count: (subscriber.collector_upgrade_count || 0) + 1,
+            last_upgrade_date: new Date().toISOString().slice(0, 10),
+          } : {}),
+        });
+        console.log(`✅ POTM subscriber updated: ${subscriber.name} — ${newMonths} months${hitUpgrade ? ' 🌟 Collector upgrade triggered!' : ''}`);
+      } else {
+        // Auto-create subscriber record on first order
+        const newSub = await createPotmSubscriber(shop, {
+          shopify_customer_id: order.customer ? String(order.customer.id) : null,
+          name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}`.trim() : 'Subscriber',
+          email: order.customer?.email || null,
+          start_date: new Date().toISOString().slice(0, 10),
+          months_renewed: 1,
+          collector_upgrade_count: 0,
+          status: 'active',
+        });
+        console.log(`✅ POTM new subscriber auto-created: ${newSub.name}`);
+      }
+    }
+
   } catch (err) {
     console.error('Error processing orders/paid webhook:', err.message);
   }

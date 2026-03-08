@@ -103,6 +103,25 @@ async function setupPostgresTables() {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS potm_subscribers (
+      id SERIAL PRIMARY KEY,
+      shop TEXT NOT NULL,
+      shopify_customer_id TEXT,
+      name TEXT NOT NULL,
+      email TEXT,
+      start_date DATE,
+      months_renewed INTEGER DEFAULT 0,
+      collector_upgrade_count INTEGER DEFAULT 0,
+      last_upgrade_date DATE,
+      renewal_day INTEGER,
+      notes TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
 }
 
 function setupSQLiteTables() {
@@ -156,6 +175,23 @@ function setupSQLiteTables() {
       filename TEXT,
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS potm_subscribers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shop TEXT NOT NULL,
+      shopify_customer_id TEXT,
+      name TEXT NOT NULL,
+      email TEXT,
+      start_date TEXT,
+      months_renewed INTEGER DEFAULT 0,
+      collector_upgrade_count INTEGER DEFAULT 0,
+      last_upgrade_date TEXT,
+      renewal_day INTEGER,
+      notes TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 }
 
@@ -202,6 +238,8 @@ export function getDefaultSettings() {
     regular_pack_ids: [],
     collector_pack_ids: [],
     chaos_club_product_id: '',
+    potm_product_id: '',
+    potm_upgrade_interval_months: 6,
     subscription_pricing: { 3: 26, 6: 43, 9: 59, 12: 74 },
     shipping_cost: 8,
     min_margin_percent: 10,
@@ -423,5 +461,87 @@ export async function deleteDOCXTemplate(shop) {
     await pgPool.query('DELETE FROM docx_templates WHERE shop = $1', [shop]);
   } else {
     sqliteDb.prepare('DELETE FROM docx_templates WHERE shop = ?').run(shop);
+  }
+}
+
+// ─── POTM Subscribers ────────────────────────────────────────────────────────
+
+export async function getPotmSubscribers(shop) {
+  if (pgPool) {
+    const result = await pgPool.query('SELECT * FROM potm_subscribers WHERE shop = $1 ORDER BY name', [shop]);
+    return result.rows;
+  } else {
+    return sqliteDb.prepare('SELECT * FROM potm_subscribers WHERE shop = ? ORDER BY name').all(shop);
+  }
+}
+
+export async function getPotmSubscriber(shop, id) {
+  if (pgPool) {
+    const result = await pgPool.query('SELECT * FROM potm_subscribers WHERE shop = $1 AND id = $2', [shop, id]);
+    return result.rows[0] || null;
+  } else {
+    return sqliteDb.prepare('SELECT * FROM potm_subscribers WHERE shop = ? AND id = ?').get(shop, id) || null;
+  }
+}
+
+export async function getPotmSubscriberByCustomerId(shop, shopifyCustomerId) {
+  if (pgPool) {
+    const result = await pgPool.query(
+      'SELECT * FROM potm_subscribers WHERE shop = $1 AND shopify_customer_id = $2 AND status = $3',
+      [shop, shopifyCustomerId, 'active']
+    );
+    return result.rows[0] || null;
+  } else {
+    return sqliteDb.prepare(
+      'SELECT * FROM potm_subscribers WHERE shop = ? AND shopify_customer_id = ? AND status = ?'
+    ).get(shop, shopifyCustomerId, 'active') || null;
+  }
+}
+
+export async function createPotmSubscriber(shop, data) {
+  const fields = ['shopify_customer_id', 'name', 'email', 'start_date', 'months_renewed', 'collector_upgrade_count', 'last_upgrade_date', 'renewal_day', 'notes', 'status'];
+  const values = [data.shopify_customer_id || null, data.name, data.email || null, data.start_date || null, data.months_renewed || 0, data.collector_upgrade_count || 0, data.last_upgrade_date || null, data.renewal_day || null, data.notes || null, data.status || 'active'];
+
+  if (pgPool) {
+    const placeholders = fields.map((_, i) => `$${i + 2}`).join(', ');
+    const result = await pgPool.query(
+      `INSERT INTO potm_subscribers (shop, ${fields.join(', ')}) VALUES ($1, ${placeholders}) RETURNING *`,
+      [shop, ...values]
+    );
+    return result.rows[0];
+  } else {
+    const placeholders = fields.map(() => '?').join(', ');
+    const info = sqliteDb.prepare(
+      `INSERT INTO potm_subscribers (shop, ${fields.join(', ')}) VALUES (?, ${placeholders})`
+    ).run(shop, ...values);
+    return sqliteDb.prepare('SELECT * FROM potm_subscribers WHERE id = ?').get(info.lastInsertRowid);
+  }
+}
+
+export async function updatePotmSubscriber(shop, id, data) {
+  const fields = ['name', 'email', 'start_date', 'months_renewed', 'collector_upgrade_count', 'last_upgrade_date', 'renewal_day', 'notes', 'status', 'shopify_customer_id'];
+  const values = fields.map(f => (data[f] !== undefined ? data[f] : null));
+
+  if (pgPool) {
+    const sets = fields.map((f, i) => `${f} = $${i + 3}`).join(', ');
+    const result = await pgPool.query(
+      `UPDATE potm_subscribers SET ${sets}, updated_at = NOW() WHERE shop = $1 AND id = $2 RETURNING *`,
+      [shop, id, ...values]
+    );
+    return result.rows[0] || null;
+  } else {
+    const sets = fields.map(f => `${f} = ?`).join(', ');
+    sqliteDb.prepare(
+      `UPDATE potm_subscribers SET ${sets}, updated_at = datetime('now') WHERE shop = ? AND id = ?`
+    ).run(...values, shop, id);
+    return sqliteDb.prepare('SELECT * FROM potm_subscribers WHERE id = ?').get(id) || null;
+  }
+}
+
+export async function deletePotmSubscriber(shop, id) {
+  if (pgPool) {
+    await pgPool.query('DELETE FROM potm_subscribers WHERE shop = $1 AND id = $2', [shop, id]);
+  } else {
+    sqliteDb.prepare('DELETE FROM potm_subscribers WHERE shop = ? AND id = ?').run(shop, id);
   }
 }

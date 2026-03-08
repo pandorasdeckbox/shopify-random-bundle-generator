@@ -278,6 +278,7 @@
   <button class="tab-btn" onclick="switchTab('subscribers')">👥 Subscribers</button>
   <button class="tab-btn" onclick="switchTab('history')">📋 History</button>
   <button class="tab-btn" onclick="switchTab('low-stock')">📉 Low Stock</button>
+  <button class="tab-btn" onclick="switchTab('potm')">🎴 Pack of Month</button>
 </div>
 
 <div class="content">
@@ -457,6 +458,16 @@
         <input type="text" id="s-chaos-product" placeholder="gid://shopify/Product/123456789">
         <small style="color:var(--muted); margin-top:4px; display:block;">Find this in the URL when editing the product in Shopify Admin.</small>
       </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>Pack of the Month Shopify Product GID</label>
+        <input type="text" id="s-potm-product" placeholder="gid://shopify/Product/123456789">
+        <small style="color:var(--muted); margin-top:4px; display:block;">When a renewal order is paid, the subscriber's month count is incremented automatically.</small>
+      </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>POTM Collector Upgrade Interval (months)</label>
+        <input type="number" id="s-potm-interval" value="6" min="1" max="120" style="max-width:120px;">
+        <small style="color:var(--muted); margin-top:4px; display:block;">Every N months, subscriber gets a Collector Booster upgrade flag.</small>
+      </div>
       <div id="webhook-alert"></div>
       <button class="btn btn-secondary" onclick="registerWebhook()">🔗 Register orders/paid Webhook</button>
     </div>
@@ -606,6 +617,40 @@ Collector packs are sorted to the top of the list automatically.</pre>
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════════════════ POTM TAB -->
+  <div id="tab-potm" class="tab-panel">
+    <div class="card" style="padding-bottom:0">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h2 style="margin:0">🎴 Pack of the Month Subscribers</h2>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="openPotmImportModal()">⬇ Import from Orders</button>
+          <button class="btn btn-primary btn-sm" onclick="openPotmModal()">+ Add Subscriber</button>
+        </div>
+      </div>
+      <p style="color:var(--muted);font-size:0.82rem;margin-bottom:14px;margin-top:-8px;">
+        Tracks monthly pack subscribers. Every <span id="potm-interval-display">6</span> months, a 🌟 collector upgrade is flagged automatically when a renewal order is paid.
+      </p>
+      <div id="potm-loading" class="loading" style="display:none"><div class="spinner"></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Start Date</th>
+              <th>Months</th>
+              <th>Next Upgrade</th>
+              <th>Upgrades</th>
+              <th>Last Upgrade</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="potm-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /content -->
 
 <!-- ══════════════════════════════════════════════════════ SUBSCRIBER MODAL -->
@@ -688,7 +733,40 @@ Collector packs are sorted to the top of the list automatically.</pre>
   </div>
 </div>
 
-<!-- Import from Orders Modal -->
+  <!-- ══════════════════════════════════════════════════════ POTM TAB -->
+  <div id="tab-potm" class="tab-panel">
+    <div class="card" style="padding-bottom:0">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h2 style="margin:0">🎴 Pack of the Month Subscribers</h2>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="openPotmImportModal()">⬇ Import from Orders</button>
+          <button class="btn btn-primary btn-sm" onclick="openPotmModal()">+ Add Subscriber</button>
+        </div>
+      </div>
+      <p style="color:var(--muted);font-size:0.82rem;margin-bottom:14px;margin-top:-8px;">
+        Tracks monthly pack subscribers. Every <span id="potm-interval-display">6</span> months, a 🌟 collector upgrade is flagged.
+        The webhook auto-increments months when a renewal order is paid.
+      </p>
+      <div id="potm-loading" class="loading" style="display:none"><div class="spinner"></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Start Date</th>
+              <th>Months</th>
+              <th>Next Upgrade</th>
+              <th>Upgrades</th>
+              <th>Last Upgrade</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="potm-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 <div id="import-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeImportModal()">
   <div class="modal" style="max-width:700px;width:95%">
     <h2 style="margin-top:0">Import Subscribers from Order History</h2>
@@ -737,6 +815,112 @@ Collector packs are sorted to the top of the list automatically.</pre>
   </div>
 </div>
 
+<!-- POTM Subscriber Modal -->
+<div id="potm-modal" class="modal-overlay" onclick="if(event.target===this)closePotmModal()">
+  <div class="modal">
+    <h2 id="potm-modal-title">Add POTM Subscriber</h2>
+    <input type="hidden" id="potm-modal-id">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Name *</label>
+        <input type="text" id="pm-name" placeholder="Full name">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="text" id="pm-email" placeholder="customer@email.com">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Shopify Customer ID</label>
+        <input type="text" id="pm-customer-id" placeholder="Numeric ID">
+      </div>
+      <div class="form-group">
+        <label>Start Date</label>
+        <input type="date" id="pm-start-date">
+      </div>
+      <div class="form-group">
+        <label>Renewal Day (1–31)</label>
+        <input type="number" id="pm-renewal-day" min="1" max="31" placeholder="e.g. 15">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Months Subscribed</label>
+        <input type="number" id="pm-months" value="0" min="0">
+      </div>
+      <div class="form-group">
+        <label>Collector Upgrades</label>
+        <input type="number" id="pm-upgrades" value="0" min="0">
+      </div>
+      <div class="form-group">
+        <label>Last Upgrade Date</label>
+        <input type="date" id="pm-last-upgrade">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Status</label>
+        <select id="pm-status">
+          <option value="active">Active</option>
+          <option value="paused">Paused</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Notes</label>
+      <textarea id="pm-notes" rows="2" placeholder="Internal notes…"></textarea>
+    </div>
+    <div id="potm-modal-alert"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closePotmModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="savePotmSubscriber()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- POTM Import Modal -->
+<div id="potm-import-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closePotmImportModal()">
+  <div class="modal" style="max-width:680px;width:95%">
+    <h2 style="margin-top:0">Import POTM Subscribers from Order History</h2>
+    <p style="color:var(--muted);margin-top:0;font-size:0.9rem;">
+      Select your Pack of the Month product, then scan your order history to create subscriber records.
+    </p>
+    <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:14px;">
+      <div style="flex:1;">
+        <input type="text" id="potm-import-search" placeholder="Type to search products…"
+          autocomplete="off"
+          oninput="filterPotmImportProducts()"
+          onfocus="showPotmImportDropdown()"
+          style="width:100%;box-sizing:border-box;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:0.9rem;">
+        <input type="hidden" id="potm-import-product-gid">
+        <div id="potm-import-dropdown" style="display:none;position:absolute;z-index:200;background:var(--surface2);border:1px solid var(--border);border-radius:6px;max-height:220px;overflow-y:auto;width:calc(100% - 2px);"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="runPotmImportPreview()" style="white-space:nowrap;">🔍 Find Orders</button>
+    </div>
+    <div id="potm-import-loading" class="loading" style="display:none"><div class="spinner"></div></div>
+    <p id="potm-import-summary" style="font-size:0.85rem;color:var(--muted);margin-bottom:8px;"></p>
+    <div id="potm-import-results" style="display:none">
+      <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+        <table>
+          <thead><tr>
+            <th><input type="checkbox" onchange="toggleAllPotmImport(this.checked)" checked></th>
+            <th>Name</th><th>Email</th><th>First Order</th><th>Months</th><th>Status</th>
+          </tr></thead>
+          <tbody id="potm-import-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="potm-import-empty" style="display:none;text-align:center;padding:24px;color:var(--muted)"></div>
+    <div id="potm-import-alert" style="margin-top:12px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closePotmImportModal()">Cancel</button>
+      <button id="potm-import-confirm-btn" class="btn btn-primary" onclick="confirmPotmImport()" style="display:none">Import Selected</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ─── State ────────────────────────────────────────────────────────────────────
 const SHOP = new URLSearchParams(location.search).get('shop') || '';
@@ -779,6 +963,7 @@ function switchTab(name) {
   if (name === 'subscribers') loadSubscribers();
   if (name === 'history') loadHistory();
   if (name === 'low-stock') loadLowStock();
+  if (name === 'potm') loadPotmSubscribers();
 }
 
 // ─── API Helper ───────────────────────────────────────────────────────────────
@@ -1141,6 +1326,10 @@ async function loadSettings() {
     document.getElementById('s-max-collector').value = s.collector_upgrade_max_price || 50;
     document.getElementById('s-luck-months').value = s.luck_protection_months || 12;
     document.getElementById('s-chaos-product').value = s.chaos_club_product_id || '';
+    document.getElementById('s-potm-product').value = s.potm_product_id || '';
+    document.getElementById('s-potm-interval').value = s.potm_upgrade_interval_months || 6;
+    const intervalEl = document.getElementById('potm-interval-display');
+    if (intervalEl) intervalEl.textContent = s.potm_upgrade_interval_months || 6;
     updatePackCountButtons(s);
     loadTemplateStatus();
   } catch(e) { /* silent on init */ }
@@ -1175,6 +1364,8 @@ async function saveSettings() {
     collector_upgrade_max_price: parseFloat(document.getElementById('s-max-collector').value),
     luck_protection_months: parseInt(document.getElementById('s-luck-months').value),
     chaos_club_product_id: document.getElementById('s-chaos-product').value.trim(),
+    potm_product_id: document.getElementById('s-potm-product').value.trim(),
+    potm_upgrade_interval_months: parseInt(document.getElementById('s-potm-interval').value) || 6,
   };
 
   try {
@@ -1365,6 +1556,253 @@ async function deleteSubscriber(id, name) {
     loadSubscribersForDropdown();
   } catch(e) {
     alert('Delete failed: ' + e.message);
+  }
+}
+
+// ─── POTM Tab ─────────────────────────────────────────────────────────────────
+let potmSubscribers = [];
+
+async function loadPotmSubscribers() {
+  document.getElementById('potm-loading').style.display = 'block';
+  try {
+    const { subscribers: subs } = await api('/api/potm/subscribers');
+    potmSubscribers = subs || [];
+    renderPotmSubscribers(potmSubscribers);
+  } catch(e) {
+    showAlert('gen-alert', 'Failed to load POTM subscribers: ' + e.message);
+  } finally {
+    document.getElementById('potm-loading').style.display = 'none';
+  }
+}
+
+function renderPotmSubscribers(subs) {
+  const interval = parseInt(document.getElementById('s-potm-interval')?.value) || (currentSettings?.potm_upgrade_interval_months) || 6;
+  const tbody = document.getElementById('potm-tbody');
+  if (!subs.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px;">No POTM subscribers yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = subs.map(s => {
+    const statusClass = { active: 'badge-green', paused: 'badge-yellow', cancelled: 'badge-red' }[s.status] || 'badge-blue';
+    const startFmt = s.start_date ? new Date(s.start_date).toLocaleDateString() : '—';
+    const upgradeFmt = s.last_upgrade_date ? new Date(s.last_upgrade_date).toLocaleDateString() : '—';
+    const months = s.months_renewed || 0;
+    const remainder = months % interval;
+    const monthsToNext = remainder === 0 ? (months === 0 ? interval : 0) : interval - remainder;
+    const dueNow = months > 0 && remainder === 0;
+    const nextUpgradeCell = dueNow
+      ? `<span style="color:var(--accent);font-weight:700">🌟 Due now!</span>`
+      : `<span style="color:var(--muted)">${monthsToNext} mo</span>`;
+    return `<tr>
+      <td><strong>${s.name}</strong><br><span style="color:var(--muted);font-size:0.78rem">${s.email||''}</span></td>
+      <td>${startFmt}</td>
+      <td>${months}</td>
+      <td>${nextUpgradeCell}</td>
+      <td>${s.collector_upgrade_count || 0}</td>
+      <td style="font-size:0.85rem">${upgradeFmt}</td>
+      <td><span class="badge ${statusClass}">${s.status}</span></td>
+      <td><div class="action-btns">
+        <button class="btn btn-secondary btn-sm" onclick="openPotmModal(${s.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deletePotmSubscriber(${s.id}, '${s.name.replace(/'/g,"\\'")}')">Del</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function openPotmModal(id) {
+  document.getElementById('potm-modal-alert').innerHTML = '';
+  if (id) {
+    const s = potmSubscribers.find(s => s.id === id);
+    if (!s) return;
+    document.getElementById('potm-modal-title').textContent = 'Edit POTM Subscriber';
+    document.getElementById('potm-modal-id').value = id;
+    document.getElementById('pm-name').value = s.name || '';
+    document.getElementById('pm-email').value = s.email || '';
+    document.getElementById('pm-customer-id').value = s.shopify_customer_id || '';
+    document.getElementById('pm-start-date').value = s.start_date ? s.start_date.slice(0,10) : '';
+    document.getElementById('pm-renewal-day').value = s.renewal_day || '';
+    document.getElementById('pm-months').value = s.months_renewed || 0;
+    document.getElementById('pm-upgrades').value = s.collector_upgrade_count || 0;
+    document.getElementById('pm-last-upgrade').value = s.last_upgrade_date ? s.last_upgrade_date.slice(0,10) : '';
+    document.getElementById('pm-status').value = s.status || 'active';
+    document.getElementById('pm-notes').value = s.notes || '';
+  } else {
+    document.getElementById('potm-modal-title').textContent = 'Add POTM Subscriber';
+    document.getElementById('potm-modal-id').value = '';
+    ['pm-name','pm-email','pm-customer-id','pm-start-date','pm-renewal-day','pm-last-upgrade','pm-notes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('pm-months').value = 0;
+    document.getElementById('pm-upgrades').value = 0;
+    document.getElementById('pm-status').value = 'active';
+  }
+  document.getElementById('potm-modal').classList.add('open');
+}
+
+function closePotmModal() {
+  document.getElementById('potm-modal').classList.remove('open');
+}
+
+async function savePotmSubscriber() {
+  const name = document.getElementById('pm-name').value.trim();
+  if (!name) { showAlert('potm-modal-alert', 'Name is required', 'error'); return; }
+
+  const id = document.getElementById('potm-modal-id').value;
+  const payload = {
+    name,
+    email: document.getElementById('pm-email').value.trim() || null,
+    shopify_customer_id: document.getElementById('pm-customer-id').value.trim() || null,
+    start_date: document.getElementById('pm-start-date').value || null,
+    renewal_day: parseInt(document.getElementById('pm-renewal-day').value) || null,
+    months_renewed: parseInt(document.getElementById('pm-months').value) || 0,
+    collector_upgrade_count: parseInt(document.getElementById('pm-upgrades').value) || 0,
+    last_upgrade_date: document.getElementById('pm-last-upgrade').value || null,
+    status: document.getElementById('pm-status').value,
+    notes: document.getElementById('pm-notes').value.trim() || null,
+  };
+
+  try {
+    if (id) {
+      await api(`/api/potm/subscribers/${id}`, { method: 'PUT', body: payload });
+    } else {
+      await api('/api/potm/subscribers', { method: 'POST', body: payload });
+    }
+    closePotmModal();
+    loadPotmSubscribers();
+  } catch(e) {
+    showAlert('potm-modal-alert', 'Save failed: ' + e.message);
+  }
+}
+
+async function deletePotmSubscriber(id, name) {
+  if (!confirm(`Delete POTM subscriber "${name}"? This cannot be undone.`)) return;
+  try {
+    await api(`/api/potm/subscribers/${id}`, { method: 'DELETE', body: {} });
+    loadPotmSubscribers();
+  } catch(e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+// ─── POTM Import ──────────────────────────────────────────────────────────────
+let potmImportCandidates = [];
+
+async function openPotmImportModal() {
+  document.getElementById('potm-import-modal').style.display = 'flex';
+  document.getElementById('potm-import-results').style.display = 'none';
+  document.getElementById('potm-import-empty').style.display = 'none';
+  document.getElementById('potm-import-confirm-btn').style.display = 'none';
+  document.getElementById('potm-import-summary').textContent = '';
+  potmImportCandidates = [];
+
+  // Load products for the picker if not already loaded
+  if (!allProducts.length) await loadProducts();
+
+  // Pre-select if already set in settings
+  const savedGid = currentSettings?.potm_product_id;
+  if (savedGid) {
+    const match = allProducts.find(p => p.id === savedGid);
+    if (match) selectPotmImportProduct(match.id, match.title);
+  } else {
+    document.getElementById('potm-import-search').value = '';
+    document.getElementById('potm-import-product-gid').value = '';
+  }
+}
+
+function closePotmImportModal() {
+  document.getElementById('potm-import-modal').style.display = 'none';
+}
+
+function filterPotmImportProducts() {
+  const q = document.getElementById('potm-import-search').value.toLowerCase();
+  showPotmImportDropdown(q);
+}
+
+function showPotmImportDropdown(q = '') {
+  const dd = document.getElementById('potm-import-dropdown');
+  const matches = allProducts.filter(p => p.title.toLowerCase().includes(q)).slice(0, 20);
+  if (!matches.length) { dd.style.display = 'none'; return; }
+  dd.style.display = 'block';
+  dd.innerHTML = matches.map(p => `<div style="padding:8px 12px;cursor:pointer;font-size:0.88rem;" onmousedown="selectPotmImportProduct('${p.id}','${p.title.replace(/'/g,"\\'")}');">${p.title}</div>`).join('');
+}
+
+function selectPotmImportProduct(gid, title) {
+  document.getElementById('potm-import-search').value = title;
+  document.getElementById('potm-import-product-gid').value = gid;
+  document.getElementById('potm-import-dropdown').style.display = 'none';
+}
+
+async function runPotmImportPreview() {
+  const productGid = document.getElementById('potm-import-product-gid').value;
+  if (!productGid) { alert('Please select a product first.'); return; }
+
+  document.getElementById('potm-import-loading').style.display = 'block';
+  document.getElementById('potm-import-results').style.display = 'none';
+  document.getElementById('potm-import-empty').style.display = 'none';
+  document.getElementById('potm-import-confirm-btn').style.display = 'none';
+  potmImportCandidates = [];
+
+  try {
+    const { candidates } = await api(`/api/potm/subscribers/import-preview?product_gid=${encodeURIComponent(productGid)}`);
+    potmImportCandidates = candidates || [];
+
+    if (!potmImportCandidates.length) {
+      document.getElementById('potm-import-empty').style.display = 'block';
+      document.getElementById('potm-import-empty').textContent = 'No orders found for this product.';
+    } else {
+      renderPotmImportCandidates();
+      document.getElementById('potm-import-results').style.display = 'block';
+      document.getElementById('potm-import-confirm-btn').style.display = 'inline-block';
+    }
+  } catch(e) {
+    document.getElementById('potm-import-empty').style.display = 'block';
+    document.getElementById('potm-import-empty').textContent = 'Error: ' + e.message;
+  } finally {
+    document.getElementById('potm-import-loading').style.display = 'none';
+  }
+}
+
+function renderPotmImportCandidates() {
+  const existing = potmImportCandidates.filter(c => c.already_exists).length;
+  const newCount = potmImportCandidates.length - existing;
+  document.getElementById('potm-import-summary').textContent =
+    `Found ${potmImportCandidates.length} customers — ${newCount} new, ${existing} already in your POTM list.`;
+
+  document.getElementById('potm-import-tbody').innerHTML = potmImportCandidates.map((c, i) => `
+    <tr style="${c.already_exists ? 'opacity:0.5' : ''}">
+      <td><input type="checkbox" class="potm-import-check" data-idx="${i}" ${c.already_exists ? '' : 'checked'}></td>
+      <td>${c.name}</td>
+      <td style="font-size:0.82rem;color:var(--muted)">${c.email || '—'}</td>
+      <td style="font-size:0.82rem">${c.first_order_date ? new Date(c.first_order_date).toLocaleDateString() : '—'}</td>
+      <td>${c.months_renewed}</td>
+      <td>${c.already_exists ? '<span class="badge badge-yellow">Exists</span>' : '<span class="badge badge-green">New</span>'}</td>
+    </tr>
+  `).join('');
+}
+
+function toggleAllPotmImport(checked) {
+  document.querySelectorAll('.potm-import-check').forEach(cb => cb.checked = checked);
+}
+
+async function confirmPotmImport() {
+  const selected = [];
+  document.querySelectorAll('.potm-import-check:checked').forEach(cb => {
+    selected.push(potmImportCandidates[parseInt(cb.dataset.idx)]);
+  });
+
+  if (!selected.length) { showAlert('potm-import-alert', 'No subscribers selected.', 'error'); return; }
+
+  const btn = document.getElementById('potm-import-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+
+  try {
+    const { imported, skipped } = await api('/api/potm/subscribers/import', { method: 'POST', body: { candidates: selected } });
+    closePotmImportModal();
+    loadPotmSubscribers();
+    alert(`✅ Imported ${imported} subscriber${imported !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} (already exist)` : ''}.`);
+  } catch(e) {
+    showAlert('potm-import-alert', 'Import failed: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Import Selected';
   }
 }
 
