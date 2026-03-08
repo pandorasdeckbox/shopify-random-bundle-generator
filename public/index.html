@@ -785,10 +785,15 @@ function onSubscriberSelect() {
   });
   currentPackCount = packCount;
 
-  // Set last upgrade date if D20 enabled
+  // Set last upgrade date (always, so it's ready when D20 is toggled on)
+  const dateInput = document.getElementById('last-upgrade-date');
   if (lastUpgrade) {
-    document.getElementById('last-upgrade-date').value = lastUpgrade;
-    document.getElementById('last-upgrade-date').dispatchEvent(new Event('change'));
+    // Normalize to YYYY-MM-DD — DB may return full ISO timestamp
+    dateInput.value = lastUpgrade.slice(0, 10);
+    dateInput.dispatchEvent(new Event('change'));
+  } else {
+    dateInput.value = '';
+    document.getElementById('months-since').value = '';
   }
 }
 
