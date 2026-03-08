@@ -615,12 +615,22 @@
       Select your Chaos Club subscription product, then search your order history to create subscriber records.
       <strong>Last Upgrade Date must be set manually after import.</strong>
     </p>
-    <!-- Product picker -->
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">
-      <select id="import-product-select" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:0.9rem;">
-        <option value="">— Select Chaos Club product… —</option>
-      </select>
-      <button class="btn btn-primary btn-sm" onclick="runImportPreview()">🔍 Find Orders</button>
+    <!-- Product picker (type-to-search) -->
+    <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:14px;position:relative;">
+      <div style="flex:1;position:relative;">
+        <input type="text" id="import-product-search" placeholder="Type to search products…"
+          autocomplete="off"
+          oninput="filterImportProducts()"
+          onfocus="showImportDropdown()"
+          style="width:100%;box-sizing:border-box;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:0.9rem;">
+        <input type="hidden" id="import-product-gid">
+        <div id="import-product-dropdown"
+          style="display:none;position:absolute;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;
+                 background:var(--surface2);border:1px solid var(--border);border-radius:0 0 6px 6px;
+                 z-index:1000;box-shadow:0 4px 16px rgba(0,0,0,0.4);">
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="runImportPreview()" style="white-space:nowrap;">🔍 Find Orders</button>
     </div>
     <div id="import-loading" class="loading" style="display:none"><div class="spinner"></div></div>
     <div id="import-results" style="display:none">
@@ -661,6 +671,7 @@ let allProducts = [];
 let allCollections = [];
 let currentSettings = {};
 let subscribers = [];
+let importProductList = [];
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
@@ -1265,6 +1276,44 @@ function downloadById(id) {
 // ─── Import from Orders ───────────────────────────────────────────────────────
 let importCandidates = [];
 
+function filterImportProducts() {
+  const q = document.getElementById('import-product-search').value.toLowerCase();
+  // If the user edits the text, clear the hidden GID so they must re-pick
+  document.getElementById('import-product-gid').value = '';
+  showImportDropdown(q);
+}
+
+function showImportDropdown(q = '') {
+  const dropdown = document.getElementById('import-product-dropdown');
+  if (!importProductList.length) return;
+  const search = q || document.getElementById('import-product-search').value.toLowerCase();
+  const matches = search
+    ? importProductList.filter(p => p.title.toLowerCase().includes(search)).slice(0, 30)
+    : importProductList.slice(0, 30);
+  if (!matches.length) { dropdown.style.display = 'none'; return; }
+  dropdown.innerHTML = matches.map(p =>
+    `<div class="import-product-option" data-id="${p.id}" data-title="${p.title.replace(/"/g,'&quot;')}"
+      style="padding:8px 12px;cursor:pointer;font-size:0.88rem;border-bottom:1px solid var(--border)"
+      onmousedown="selectImportProduct('${p.id}','${p.title.replace(/'/g,'\\\'')}')"
+      onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background=''">${p.title}</div>`
+  ).join('');
+  dropdown.style.display = 'block';
+}
+
+function selectImportProduct(gid, title) {
+  document.getElementById('import-product-search').value = title;
+  document.getElementById('import-product-gid').value = gid;
+  document.getElementById('import-product-dropdown').style.display = 'none';
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', e => {
+  if (!e.target.closest('#import-product-search') && !e.target.closest('#import-product-dropdown')) {
+    const dd = document.getElementById('import-product-dropdown');
+    if (dd) dd.style.display = 'none';
+  }
+});
+
 async function openImportModal() {
   document.getElementById('import-modal').style.display = 'flex';
   document.getElementById('import-loading').style.display = 'none';
@@ -1274,18 +1323,21 @@ async function openImportModal() {
   importCandidates = [];
 
   // Populate product picker — use all loaded products, falling back to a fresh fetch
-  const products = allProducts.length ? allProducts : (await api('/api/products').then(d => d.products).catch(() => []));
-  const sel = document.getElementById('import-product-select');
-  sel.innerHTML = '<option value="">— Select Chaos Club product… —</option>' +
-    products.map(p => `<option value="${p.id}">${p.title}</option>`).join('');
+  importProductList = allProducts.length ? allProducts : (await api('/api/products').then(d => d.products).catch(() => []));
 
   // Pre-select if already set in settings
   const savedGid = currentSettings.chaos_club_product_id;
-  if (savedGid) sel.value = savedGid;
+  if (savedGid) {
+    const match = importProductList.find(p => p.id === savedGid);
+    if (match) selectImportProduct(match.id, match.title);
+  } else {
+    document.getElementById('import-product-search').value = '';
+    document.getElementById('import-product-gid').value = '';
+  }
 }
 
 async function runImportPreview() {
-  const productGid = document.getElementById('import-product-select').value;
+  const productGid = document.getElementById('import-product-gid').value;
   if (!productGid) { alert('Please select a product first.'); return; }
 
   document.getElementById('import-loading').style.display = 'block';
