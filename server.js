@@ -1035,7 +1035,14 @@ app.post('/webhooks/orders-paid', async (req, res) => {
         ? await getSubscriberByCustomerId(shop, String(order.customer.id))
         : null;
 
-      const packCount = subscriber?.pack_count || chaosItem.quantity || 3;
+      // Detect pack count from variant title (e.g. "6 Pack", "6-Pack") first,
+      // then fall back to the subscriber's stored pack_count, then default 3
+      const variantTitle = chaosItem.variant_title || '';
+      const variantNum = parseInt(variantTitle.match(/\b(3|6|9|12)\b/)?.[1] || '0', 10);
+      const packCount = ([3,6,9,12].includes(variantNum) ? variantNum : null)
+        || subscriber?.pack_count
+        || 3;
+      console.log(`📦 Pack count resolved: ${packCount} (variant: "${variantTitle}", subscriber: ${subscriber?.pack_count ?? 'n/a'})`);
 
       const { regular, collector } = await fetchBundleProducts(
         new shopify.clients.Graphql({ session }),
