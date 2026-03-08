@@ -914,6 +914,37 @@ app.post('/api/potm/subscribers/import', verifySession, async (req, res) => {
   }
 });
 
+// ─── API: POTM Record Renewal ─────────────────────────────────────────────────
+
+app.post('/api/potm/subscribers/:id/renew', verifySession, async (req, res) => {
+  try {
+    const shop = req.shopifySession.shop;
+    const settings = await getSettings(shop);
+    const interval = settings.potm_upgrade_interval_months || 6;
+
+    const sub = await getPotmSubscriber(shop, req.params.id);
+    if (!sub) return res.status(404).json({ error: 'Subscriber not found' });
+
+    const newMonths = (sub.months_renewed || 0) + 1;
+    const upgraded = newMonths % interval === 0;
+
+    const updated = await updatePotmSubscriber(shop, sub.id, {
+      ...sub,
+      months_renewed: newMonths,
+      ...(upgraded ? {
+        collector_upgrade_count: (sub.collector_upgrade_count || 0) + 1,
+        last_upgrade_date: new Date().toISOString().slice(0, 10),
+      } : {}),
+    });
+
+    log('INFO', `POTM renewal recorded for ${sub.name}`, { months: newMonths, upgraded });
+    res.json({ subscriber: updated, upgraded, months: newMonths });
+  } catch (err) {
+    console.error('POTM renew error:', err.message);
+    res.status(500).json({ error: 'Failed to record renewal: ' + err.message });
+  }
+});
+
 // ─── API: Register Webhooks ───────────────────────────────────────────────────
 
 app.post('/api/register-webhooks', verifySession, async (req, res) => {

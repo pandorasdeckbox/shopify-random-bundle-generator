@@ -1603,6 +1603,7 @@ function renderPotmSubscribers(subs) {
       <td><span class="badge ${statusClass}">${s.status}</span></td>
       <td><div class="action-btns">
         <button class="btn btn-secondary btn-sm" onclick="openPotmModal(${s.id})">Edit</button>
+        <button class="btn btn-sm" style="background:#2a7a3b;color:#fff" onclick="recordPotmRenewal(${s.id}, '${s.name.replace(/'/g,"\\'")}')">+1 Month</button>
         <button class="btn btn-danger btn-sm" onclick="deletePotmSubscriber(${s.id}, '${s.name.replace(/'/g,"\\'")}')">Del</button>
       </div></td>
     </tr>`;
@@ -1679,6 +1680,23 @@ async function deletePotmSubscriber(id, name) {
     loadPotmSubscribers();
   } catch(e) {
     alert('Delete failed: ' + e.message);
+  }
+}
+
+async function recordPotmRenewal(id, name) {
+  if (!confirm(`Record a renewal for "${name}"?\nThis will increment their month count and check for a collector upgrade.`)) return;
+  try {
+    const result = await api(`/api/potm/subscribers/${id}/renew`, { method: 'POST', body: {} });
+    loadPotmSubscribers();
+    if (result.upgraded) {
+      alert(`\u2705 Renewal recorded for ${name}.\n\n\uD83C\uDF1F Month ${result.months} — COLLECTOR UPGRADE TRIGGERED!\nMake sure to include a Collector Booster in their next shipment.`);
+    } else {
+      const interval = parseInt(document.getElementById('s-potm-interval')?.value) || (currentSettings?.potm_upgrade_interval_months) || 6;
+      const toNext = interval - (result.months % interval);
+      alert(`\u2705 Renewal recorded for ${name} — ${result.months} month${result.months !== 1 ? 's' : ''} total.\n${toNext} month${toNext !== 1 ? 's' : ''} until next collector upgrade.`);
+    }
+  } catch(e) {
+    alert('Failed to record renewal: ' + e.message);
   }
 }
 
