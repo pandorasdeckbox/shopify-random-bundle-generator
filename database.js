@@ -94,6 +94,15 @@ async function setupPostgresTables() {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS docx_templates (
+      shop TEXT PRIMARY KEY,
+      template_data BYTEA NOT NULL,
+      filename TEXT,
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
 }
 
 function setupSQLiteTables() {
@@ -139,6 +148,13 @@ function setupSQLiteTables() {
       packs_json TEXT,
       dry_run INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS docx_templates (
+      shop TEXT PRIMARY KEY,
+      template_data BLOB NOT NULL,
+      filename TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
     );
   `);
 }
@@ -368,5 +384,44 @@ export async function getBundleById(shop, id) {
     return result.rows[0] || null;
   } else {
     return sqliteDb.prepare('SELECT * FROM bundle_history WHERE shop = ? AND id = ?').get(shop, id) || null;
+  }
+}
+
+// ─── DOCX Templates ─────────────────────────────────────────────────────
+
+export async function saveDOCXTemplate(shop, buffer, filename) {
+  if (pgPool) {
+    await pgPool.query(
+      `INSERT INTO docx_templates (shop, template_data, filename, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (shop) DO UPDATE SET template_data = EXCLUDED.template_data, filename = EXCLUDED.filename, updated_at = NOW()`,
+      [shop, buffer, filename || 'template.docx']
+    );
+  } else {
+    sqliteDb.prepare(
+      `INSERT INTO docx_templates (shop, template_data, filename, updated_at)
+       VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(shop) DO UPDATE SET template_data = excluded.template_data, filename = excluded.filename, updated_at = datetime('now')`
+    ).run(shop, buffer, filename || 'template.docx');
+  }
+}
+
+export async function getDOCXTemplate(shop) {
+  if (pgPool) {
+    const result = await pgPool.query('SELECT template_data, filename FROM docx_templates WHERE shop = $1', [shop]);
+    if (!result.rows.length) return null;
+    return { buffer: result.rows[0].template_data, filename: result.rows[0].filename };
+  } else {
+    const row = sqliteDb.prepare('SELECT template_data, filename FROM docx_templates WHERE shop = ?').get(shop);
+    if (!row) return null;
+    return { buffer: Buffer.from(row.template_data), filename: row.filename };
+  }
+}
+
+export async function deleteDOCXTemplate(shop) {
+  if (pgPool) {
+    await pgPool.query('DELETE FROM docx_templates WHERE shop = $1', [shop]);
+  } else {
+    sqliteDb.prepare('DELETE FROM docx_templates WHERE shop = ?').run(shop);
   }
 }

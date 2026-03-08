@@ -34,6 +34,9 @@ import {
   saveBundleHistory,
   getBundleHistory,
   getBundleById,
+  saveDOCXTemplate,
+  getDOCXTemplate,
+  deleteDOCXTemplate,
 } from './database.js';
 
 import {
@@ -47,7 +50,7 @@ import {
   calculateMonthsSince,
 } from './bundleGenerator.js';
 
-import { generateBundleDocx, bundleFilename } from './docxGenerator.js';
+import { generateBundleDocx, generateBundleDocxFromTemplate, bundleFilename } from './docxGenerator.js';
 
 dotenv.config();
 
@@ -407,7 +410,8 @@ app.post('/api/generate', verifySession, async (req, res) => {
 
 app.get('/api/bundles/:id/docx', verifySession, async (req, res) => {
   try {
-    const bundle = await getBundleById(req.shopifySession.shop, req.params.id);
+    const shop = req.shopifySession.shop;
+    const bundle = await getBundleById(shop, req.params.id);
     if (!bundle) return res.status(404).json({ error: 'Bundle not found' });
 
     const packs = typeof bundle.packs_json === 'string' ? JSON.parse(bundle.packs_json) : bundle.packs_json;
@@ -428,8 +432,14 @@ app.get('/api/bundles/:id/docx', verifySession, async (req, res) => {
       } : null,
     };
 
-    const docxBuffer = await generateBundleDocx(bundleData, bundle.customer_name, bundle.bundle_type, bundle.dry_run === true || bundle.dry_run === 1);
+    const isDryRun = bundle.dry_run === true || bundle.dry_run === 1;
     const filename = bundleFilename(bundle.bundle_type, bundle.customer_name);
+
+    // Use uploaded template if one exists, otherwise fall back to built-in layout
+    const template = await getDOCXTemplate(shop);
+    const docxBuffer = template
+      ? await generateBundleDocxFromTemplate(template.buffer, bundleData, bundle.customer_name, bundle.bundle_type, isDryRun)
+      : await generateBundleDocx(bundleData, bundle.customer_name, bundle.bundle_type, isDryRun);
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -437,6 +447,40 @@ app.get('/api/bundles/:id/docx', verifySession, async (req, res) => {
   } catch (err) {
     console.error('Error generating DOCX:', err.message);
     res.status(500).json({ error: 'DOCX generation failed: ' + err.message });
+  }
+});
+
+// ─── API: DOCX Template ───────────────────────────────────────────────────────
+
+app.get('/api/template/status', verifySession, async (req, res) => {
+  try {
+    const template = await getDOCXTemplate(req.shopifySession.shop);
+    res.json({ hasTemplate: !!template, filename: template?.filename || null });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to check template status' });
+  }
+});
+
+app.post('/api/template', verifySession, async (req, res) => {
+  try {
+    const { data, filename } = req.body;
+    if (!data) return res.status(400).json({ error: 'No template data provided' });
+    const buffer = Buffer.from(data, 'base64');
+    if (buffer.length > 5 * 1024 * 1024) return res.status(400).json({ error: 'Template too large (max 5MB)' });
+    await saveDOCXTemplate(req.shopifySession.shop, buffer, filename || 'template.docx');
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error saving template:', err.message);
+    res.status(500).json({ error: 'Failed to save template: ' + err.message });
+  }
+});
+
+app.delete('/api/template', verifySession, async (req, res) => {
+  try {
+    await deleteDOCXTemplate(req.shopifySession.shop);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete template' });
   }
 });
 

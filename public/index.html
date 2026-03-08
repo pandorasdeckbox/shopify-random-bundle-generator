@@ -460,6 +460,43 @@
       <button class="btn btn-secondary" onclick="registerWebhook()">🔗 Register orders/paid Webhook</button>
     </div>
 
+    <div class="card">
+      <h2>📄 DOCX Template</h2>
+      <p style="color:var(--muted);font-size:0.85rem;margin-bottom:14px;">
+        Upload a .docx file with {placeholders} to fully control the packing slip layout.
+        If no template is uploaded, a default layout is used.
+      </p>
+      <div id="template-status" style="margin-bottom:12px;font-size:0.9rem;"></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="file" id="template-file" accept=".docx" style="flex:1;min-width:200px;">
+        <button class="btn btn-primary btn-sm" onclick="uploadTemplate()">⬆ Upload Template</button>
+        <button class="btn btn-secondary btn-sm" id="delete-template-btn" onclick="deleteTemplate()" style="display:none;">🗑 Remove</button>
+      </div>
+      <div id="template-alert" style="margin-top:10px;"></div>
+      <details style="margin-top:14px;">
+        <summary style="cursor:pointer;color:var(--muted);font-size:0.82rem;">📋 Available placeholders</summary>
+        <pre style="font-size:0.75rem;color:var(--muted);margin-top:8px;white-space:pre-wrap;">{customer_name}   – subscriber name
+{date}            – today's date (Month DD, YYYY)
+{bundle_type}     – e.g. "Chaos Club"
+{pack_count}      – number of packs
+{total_retail}    – total retail value, e.g. "$47.25"
+{target_price}    – subscriber price, e.g. "$26.00"
+{margin_percent}  – e.g. "45.0%"
+{margin_dollars}  – e.g. "$21.25"
+{d20_roll}        – roll result (blank if no roll)
+{d20_result}      – "★ UPGRADE!" or "No upgrade" (blank if no roll)
+{dry_run_label}   – "DRY RUN" or "LIVE"
+
+Pack list loop (use in a table row):
+{#packs}
+  {pack_num}   {pack_name}   {pack_type}   {pack_price}
+{/packs}
+
+{pack_type} is "COLLECTOR" for collector packs, blank otherwise.
+Collector packs are sorted to the top of the list automatically.</pre>
+      </details>
+    </div>
+
     <div id="settings-alert"></div>
     <button class="btn btn-primary" onclick="saveSettings()" style="padding:12px 32px;">💾 Save All Settings</button>
   </div>
@@ -1059,6 +1096,7 @@ async function loadSettings() {
     document.getElementById('s-max-collector').value = s.collector_upgrade_max_price || 50;
     document.getElementById('s-luck-months').value = s.luck_protection_months || 12;
     document.getElementById('s-chaos-product').value = s.chaos_club_product_id || '';
+    loadTemplateStatus();
   } catch(e) { /* silent on init */ }
 }
 
@@ -1099,6 +1137,51 @@ async function registerWebhook() {
   } catch(e) {
     showAlert('webhook-alert', 'Webhook registration failed: ' + e.message);
   }
+}
+
+async function loadTemplateStatus() {
+  try {
+    const { hasTemplate, filename } = await api('/api/template/status');
+    const el = document.getElementById('template-status');
+    const btn = document.getElementById('delete-template-btn');
+    if (!el) return;
+    if (hasTemplate) {
+      el.innerHTML = `<span style="color:var(--success)">✅ Template active: <strong>${filename}</strong></span>`;
+      btn.style.display = 'inline-block';
+    } else {
+      el.textContent = 'No template uploaded — using default layout.';
+      btn.style.display = 'none';
+    }
+  } catch(e) { /* silent */ }
+}
+
+async function uploadTemplate() {
+  const file = document.getElementById('template-file').files[0];
+  if (!file) { showAlert('template-alert', 'Please select a .docx file first.'); return; }
+  if (!file.name.endsWith('.docx')) { showAlert('template-alert', 'Only .docx files are supported.'); return; }
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const bytes = new Uint8Array(e.target.result);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const base64 = btoa(binary);
+    try {
+      await api('/api/template', { method: 'POST', body: { data: base64, filename: file.name } });
+      showAlert('template-alert', '✅ Template uploaded!', 'success');
+      document.getElementById('template-file').value = '';
+      loadTemplateStatus();
+    } catch(err) { showAlert('template-alert', 'Upload failed: ' + err.message); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function deleteTemplate() {
+  if (!confirm('Remove the uploaded template? The default layout will be used instead.')) return;
+  try {
+    await api('/api/template', { method: 'DELETE' });
+    showAlert('template-alert', 'Template removed.', 'success');
+    loadTemplateStatus();
+  } catch(err) { showAlert('template-alert', 'Remove failed: ' + err.message); }
 }
 
 // ─── Subscribers Tab ──────────────────────────────────────────────────────────

@@ -2,6 +2,15 @@
  * DOCX Generator - creates a printable packing slip from bundle data.
  * Uses the 'docx' npm package (pure JS, no LibreOffice required).
  * Designed to fit on one sheet of paper.
+ *
+ * Also supports template-based generation via docxtemplater.
+ * Upload a .docx template with {placeholders} in the Settings tab.
+ *
+ * Available placeholders:
+ *   {customer_name}  {date}  {bundle_type}  {pack_count}
+ *   {total_retail}   {target_price}  {margin_percent}  {margin_dollars}
+ *   {d20_roll}       {d20_result}    {dry_run_label}
+ *   Loop: {#packs}  {pack_num}  {pack_name}  {pack_type}  {pack_price}  {/packs}
  */
 
 import {
@@ -288,4 +297,42 @@ export function bundleFilename(bundleType, customerName) {
   const safeName = (customerName || 'bundle').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const ts = new Date().toISOString().slice(0, 10);
   return `${safeType}-${safeName}-${ts}.docx`;
+}
+
+/**
+ * Fill a .docx template using docxtemplater.
+ * The template should use {placeholder} syntax and {#packs}...{/packs} for the pack list loop.
+ */
+export async function generateBundleDocxFromTemplate(templateBuffer, bundleData, customerName = 'Walk-in', bundleType = 'Chaos Club', dryRun = false) {
+  const PizZip = (await import('pizzip')).default;
+  const Docxtemplater = (await import('docxtemplater')).default;
+
+  const packs = bundleData.packs || [];
+  const orderedPacks = [...packs.filter(p => p.is_collector), ...packs.filter(p => !p.is_collector)];
+  const m = bundleData.metrics || {};
+
+  const zip = new PizZip(templateBuffer);
+  const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
+
+  doc.render({
+    customer_name: customerName,
+    date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+    bundle_type: bundleType,
+    pack_count: String(packs.length),
+    total_retail: `$${(m.total_retail || 0).toFixed(2)}`,
+    target_price: `$${(m.target_price || 0).toFixed(2)}`,
+    margin_percent: `${(m.margin_percent || 0).toFixed(1)}%`,
+    margin_dollars: `$${(m.margin_dollars || 0).toFixed(2)}`,
+    d20_roll: bundleData.d20Result?.roll ? String(bundleData.d20Result.roll) : '',
+    d20_result: bundleData.d20Result?.upgraded ? '★ UPGRADE!' : (bundleData.d20Result?.roll ? 'No upgrade' : ''),
+    dry_run_label: dryRun ? 'DRY RUN' : 'LIVE',
+    packs: orderedPacks.map((p, i) => ({
+      pack_num: String(i + 1),
+      pack_name: p.product_title + (p.variant_title ? ` – ${p.variant_title}` : ''),
+      pack_type: p.is_collector ? 'COLLECTOR' : '',
+      pack_price: `$${p.price.toFixed(2)}`,
+    })),
+  });
+
+  return doc.getZip().generate({ type: 'nodebuffer' });
 }
