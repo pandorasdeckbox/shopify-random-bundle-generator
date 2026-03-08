@@ -421,7 +421,7 @@ app.post('/api/generate', verifySession, async (req, res) => {
     });
 
     // If subscriber got a D20 upgrade, update their record
-    if (subscriber_id && d20Result?.upgraded) {
+    if (subscriber_id && d20Result?.upgraded && !dry_run) {
       const sub = await getSubscriber(shop, subscriber_id);
       if (sub) {
         await updateSubscriber(shop, subscriber_id, {
