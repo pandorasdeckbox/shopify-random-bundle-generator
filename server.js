@@ -508,17 +508,23 @@ app.get('/api/subscribers/import-preview', verifySession, async (req, res) => {
     // Extract numeric ID from GID
     const numericId = String(chaosProductId).split('/').pop();
 
-    // Paginate through ALL orders (created_at_min goes back far enough to catch old subscriptions)
+    // Paginate through ALL orders using since_id (ascending by ID) — more reliable than Link headers
     const client = new shopify.clients.Rest({ session: req.shopifySession });
     const orderMap = new Map(); // customer_id -> aggregated data
 
-    let pageInfo = null;
-    do {
-      const params = pageInfo
-        ? { page_info: pageInfo, limit: 250 }
-        : { limit: 250, status: 'any', created_at_min: '2018-01-01T00:00:00Z', fields: 'id,created_at,customer,line_items' };
-
-      const response = await client.get({ path: 'orders', query: params });
+    let sinceId = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const response = await client.get({
+        path: 'orders',
+        query: {
+          limit: 250,
+          status: 'any',
+          created_at_min: '2018-01-01T00:00:00Z',
+          since_id: sinceId,
+          fields: 'id,created_at,customer,line_items',
+        },
+      });
       const orders = response.body.orders || [];
 
       for (const order of orders) {
@@ -553,13 +559,12 @@ app.get('/api/subscribers/import-preview', verifySession, async (req, res) => {
         }
       }
 
-      // Link header can be a Headers object or a plain string depending on adapter version
-      const rawLink = typeof response.headers?.get === 'function'
-        ? response.headers.get('link')
-        : (response.headers?.link ?? response.headers?.['link'] ?? '');
-      const nextMatch = (rawLink || '').match(/<[^>]+page_info=([^>&"]+)[^>]*>;\s*rel="next"/);
-      pageInfo = nextMatch ? nextMatch[1] : null;
-    } while (pageInfo);
+      if (orders.length === 250) {
+        sinceId = orders[orders.length - 1].id;
+      } else {
+        hasMore = false;
+      }
+    }
 
     // Check which customers already exist as subscribers
     const existingSubs = await getSubscribers(shop);
