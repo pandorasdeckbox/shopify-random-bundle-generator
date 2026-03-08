@@ -481,6 +481,129 @@ app.delete('/api/subscribers/:id', verifySession, async (req, res) => {
   }
 });
 
+// ─── API: Import Subscribers Preview ─────────────────────────────────────────
+
+app.get('/api/subscribers/import-preview', verifySession, async (req, res) => {
+  try {
+    const shop = req.shopifySession.shop;
+    const settings = await getSettings(shop);
+    const chaosProductId = settings.chaos_club_product_id;
+    if (!chaosProductId) {
+      return res.status(400).json({ error: 'Chaos Club Product GID not set. Configure it in Settings first.' });
+    }
+
+    // Extract numeric ID from GID
+    const numericId = String(chaosProductId).split('/').pop();
+
+    // Paginate through all orders containing this product
+    const client = new shopify.clients.Rest({ session: req.shopifySession });
+    const orderMap = new Map(); // customer_id -> aggregated data
+
+    let pageInfo = null;
+    do {
+      const params = { limit: 250, status: 'any', fields: 'id,created_at,customer,line_items' };
+      if (pageInfo) params.page_info = pageInfo;
+
+      const response = await client.get({ path: 'orders', query: params });
+      const orders = response.body.orders || [];
+
+      for (const order of orders) {
+        if (!order.customer) continue;
+        const hasProduct = (order.line_items || []).some(
+          li => String(li.product_id) === numericId
+        );
+        if (!hasProduct) continue;
+
+        const custId = String(order.customer.id);
+        const orderDate = new Date(order.created_at);
+        const packQty = (order.line_items || []).find(li => String(li.product_id) === numericId)?.quantity || 3;
+        // Snap to nearest valid tier
+        const snapPack = packQty <= 3 ? 3 : packQty <= 6 ? 6 : packQty <= 9 ? 9 : 12;
+
+        if (!orderMap.has(custId)) {
+          orderMap.set(custId, {
+            shopify_customer_id: custId,
+            name: `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() || `Customer ${custId}`,
+            email: order.customer.email || null,
+            pack_count: snapPack,
+            first_order_date: order.created_at,
+            months_renewed: 1,
+          });
+        } else {
+          const existing = orderMap.get(custId);
+          existing.months_renewed += 1;
+          if (orderDate < new Date(existing.first_order_date)) {
+            existing.first_order_date = order.created_at;
+            existing.pack_count = snapPack;
+          }
+        }
+      }
+
+      // Check for next page via Link header
+      const linkHeader = response.headers?.get?.('link') || '';
+      const nextMatch = linkHeader.match(/<[^>]+page_info=([^>&"]+)[^>]*>;\s*rel="next"/);
+      pageInfo = nextMatch ? nextMatch[1] : null;
+    } while (pageInfo);
+
+    // Check which customers already exist as subscribers
+    const existingSubs = await getSubscribers(shop);
+    const existingIds = new Set(existingSubs.map(s => String(s.shopify_customer_id)).filter(Boolean));
+
+    const candidates = Array.from(orderMap.values()).map(c => ({
+      ...c,
+      already_exists: existingIds.has(c.shopify_customer_id),
+    }));
+
+    // Sort: new first, then alphabetical
+    candidates.sort((a, b) => {
+      if (a.already_exists !== b.already_exists) return a.already_exists ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
+
+    res.json({ candidates });
+  } catch (err) {
+    console.error('Import preview error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch order history: ' + err.message });
+  }
+});
+
+// ─── API: Import Subscribers Confirm ─────────────────────────────────────────
+
+app.post('/api/subscribers/import', verifySession, async (req, res) => {
+  try {
+    const shop = req.shopifySession.shop;
+    const { candidates } = req.body;
+    if (!Array.isArray(candidates) || !candidates.length) {
+      return res.status(400).json({ error: 'No candidates provided' });
+    }
+
+    const existingSubs = await getSubscribers(shop);
+    const existingIds = new Set(existingSubs.map(s => String(s.shopify_customer_id)).filter(Boolean));
+
+    let imported = 0, skipped = 0;
+    for (const c of candidates) {
+      if (existingIds.has(String(c.shopify_customer_id))) { skipped++; continue; }
+      await createSubscriber(shop, {
+        name: c.name,
+        email: c.email || null,
+        shopify_customer_id: c.shopify_customer_id,
+        pack_count: c.pack_count || 3,
+        start_date: c.first_order_date ? c.first_order_date.slice(0, 10) : null,
+        months_renewed: c.months_renewed || 0,
+        collector_upgrade_count: 0,
+        last_upgrade_date: null,
+        status: 'active',
+      });
+      imported++;
+    }
+
+    res.json({ imported, skipped });
+  } catch (err) {
+    console.error('Import error:', err.message);
+    res.status(500).json({ error: 'Import failed: ' + err.message });
+  }
+});
+
 // ─── API: Register Webhooks ───────────────────────────────────────────────────
 
 app.post('/api/register-webhooks', verifySession, async (req, res) => {

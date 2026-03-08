@@ -456,7 +456,10 @@
     <div class="card" style="padding-bottom:0">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <h2 style="margin:0">Chaos Club Subscribers</h2>
-        <button class="btn btn-primary btn-sm" onclick="openSubscriberModal()">+ Add Subscriber</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="openImportModal()">⬇ Import from Orders</button>
+          <button class="btn btn-primary btn-sm" onclick="openSubscriberModal()">+ Add Subscriber</button>
+        </div>
       </div>
       <div id="subscribers-loading" class="loading" style="display:none"><div class="spinner"></div></div>
       <div class="table-wrap">
@@ -587,6 +590,45 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeSubscriberModal()">Cancel</button>
       <button class="btn btn-primary" onclick="saveSubscriber()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import from Orders Modal -->
+<div id="import-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeImportModal()">
+  <div class="modal" style="max-width:700px;width:95%">
+    <h2 style="margin-top:0">Import Subscribers from Order History</h2>
+    <p style="color:var(--muted);margin-top:0;font-size:0.9rem;">
+      Searches your order history for the Chaos Club product and creates subscriber records.
+      Review the matches below before importing. <strong>Last Upgrade Date must be set manually after import.</strong>
+    </p>
+    <div id="import-loading" class="loading" style="display:none"><div class="spinner"></div></div>
+    <div id="import-results" style="display:none">
+      <div id="import-summary" style="margin-bottom:12px;font-size:0.9rem;color:var(--muted)"></div>
+      <div class="table-wrap" style="max-height:320px;overflow-y:auto">
+        <table>
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="import-check-all" onchange="toggleAllImport(this.checked)"></th>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Pack Count</th>
+              <th>First Order</th>
+              <th>Months</th>
+              <th>Already Exists</th>
+            </tr>
+          </thead>
+          <tbody id="import-tbody"></tbody>
+        </table>
+      </div>
+      <div id="import-alert" style="margin-top:12px"></div>
+    </div>
+    <div id="import-empty" style="display:none;text-align:center;padding:32px;color:var(--muted)">
+      No Chaos Club orders found. Make sure the Chaos Club Product GID is set in Settings.
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeImportModal()">Cancel</button>
+      <button id="import-confirm-btn" class="btn btn-primary" onclick="confirmImport()" style="display:none">Import Selected</button>
     </div>
   </div>
 </div>
@@ -1140,6 +1182,97 @@ function renderHistory(bundles) {
 
 function downloadById(id) {
   window.open(`/api/bundles/${id}/docx?shop=${SHOP}`, '_blank');
+}
+
+// ─── Import from Orders ───────────────────────────────────────────────────────
+let importCandidates = [];
+
+async function openImportModal() {
+  document.getElementById('import-modal').style.display = 'flex';
+  document.getElementById('import-loading').style.display = 'block';
+  document.getElementById('import-results').style.display = 'none';
+  document.getElementById('import-empty').style.display = 'none';
+  document.getElementById('import-confirm-btn').style.display = 'none';
+  importCandidates = [];
+
+  try {
+    const { candidates } = await api('/api/subscribers/import-preview');
+    importCandidates = candidates || [];
+
+    if (!importCandidates.length) {
+      document.getElementById('import-empty').style.display = 'block';
+    } else {
+      renderImportCandidates();
+      document.getElementById('import-results').style.display = 'block';
+      document.getElementById('import-confirm-btn').style.display = 'inline-block';
+    }
+  } catch(e) {
+    document.getElementById('import-empty').style.display = 'block';
+    document.getElementById('import-empty').textContent = 'Error: ' + e.message;
+  } finally {
+    document.getElementById('import-loading').style.display = 'none';
+  }
+}
+
+function closeImportModal() {
+  document.getElementById('import-modal').style.display = 'none';
+}
+
+function renderImportCandidates() {
+  const existing = importCandidates.filter(c => c.already_exists).length;
+  const newCount = importCandidates.length - existing;
+  document.getElementById('import-summary').textContent =
+    `Found ${importCandidates.length} customers — ${newCount} new, ${existing} already in your subscriber list.`;
+
+  document.getElementById('import-tbody').innerHTML = importCandidates.map((c, i) => `
+    <tr style="${c.already_exists ? 'opacity:0.5' : ''}">
+      <td><input type="checkbox" class="import-check" data-idx="${i}" ${c.already_exists ? '' : 'checked'}></td>
+      <td>${c.name}</td>
+      <td style="font-size:0.82rem;color:var(--muted)">${c.email || '—'}</td>
+      <td>
+        <select class="import-pack-select" data-idx="${i}" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:2px 6px">
+          <option value="3" ${c.pack_count===3?'selected':''}>3</option>
+          <option value="6" ${c.pack_count===6?'selected':''}>6</option>
+          <option value="9" ${c.pack_count===9?'selected':''}>9</option>
+          <option value="12" ${c.pack_count===12?'selected':''}>12</option>
+        </select>
+      </td>
+      <td style="font-size:0.82rem">${c.first_order_date ? new Date(c.first_order_date).toLocaleDateString() : '—'}</td>
+      <td>${c.months_renewed}</td>
+      <td>${c.already_exists ? '<span class="badge badge-yellow">Exists</span>' : '<span class="badge badge-green">New</span>'}</td>
+    </tr>
+  `).join('');
+}
+
+function toggleAllImport(checked) {
+  document.querySelectorAll('.import-check').forEach(cb => cb.checked = checked);
+}
+
+async function confirmImport() {
+  const selected = [];
+  document.querySelectorAll('.import-check:checked').forEach(cb => {
+    const idx = parseInt(cb.dataset.idx);
+    const packSelect = document.querySelector(`.import-pack-select[data-idx="${idx}"]`);
+    selected.push({ ...importCandidates[idx], pack_count: parseInt(packSelect?.value || importCandidates[idx].pack_count) });
+  });
+
+  if (!selected.length) { showAlert('import-alert', 'No subscribers selected.', 'error'); return; }
+
+  const btn = document.getElementById('import-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+
+  try {
+    const { imported, skipped } = await api('/api/subscribers/import', { method: 'POST', body: { candidates: selected } });
+    closeImportModal();
+    loadSubscribers();
+    loadSubscribersForDropdown();
+    alert(`✅ Imported ${imported} subscriber${imported !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} (already exist)` : ''}.`);
+  } catch(e) {
+    showAlert('import-alert', 'Import failed: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Import Selected';
+  }
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
