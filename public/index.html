@@ -642,7 +642,7 @@ async function api(url, opts = {}) {
   });
   const data = await r.json().catch(() => ({ error: r.statusText }));
   if (!r.ok) {
-    if (data.needsReauth) { window.location.href = `/auth?shop=${SHOP}`; }
+    if (data.needsReauth) { window.top.location.href = `/auth?shop=${SHOP}`; return; }
     throw new Error(data.error || 'API error');
   }
   return data;
@@ -650,7 +650,7 @@ async function api(url, opts = {}) {
 
 function handleAuthError(e) {
   if (e.message?.includes('needsReauth') || e.message?.includes('auth')) {
-    window.location.href = `/auth?shop=${SHOP}`;
+    window.top.location.href = `/auth?shop=${SHOP}`;
   }
 }
 

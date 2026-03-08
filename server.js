@@ -118,7 +118,11 @@ app.get('/app', async (req, res) => {
   if (!shop) return res.status(400).send('Missing shop parameter');
 
   const session = await sessionStorage.loadSession(`offline_${shop}`);
-  if (!session) return res.redirect(`/auth?shop=${shop}${host ? `&host=${host}` : ''}`);
+  if (!session) {
+    // Must break out of Shopify's iframe before redirecting to OAuth
+    const authUrl = `/auth?shop=${shop}${host ? `&host=${host}` : ''}`;
+    return res.send(`<!DOCTYPE html><html><head><script>window.top.location.href='${authUrl}';<\/script></head><body>Redirecting...</body></html>`);
+  }
 
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
