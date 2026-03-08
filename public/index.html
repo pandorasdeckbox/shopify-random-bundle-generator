@@ -260,7 +260,21 @@
     }
     .history-item:hover { background: rgba(255,255,255,0.02); }
     .history-id { color: var(--muted); font-size: 0.8rem; width: 32px; }
+
+    /* ── Pikaday calendar theme ───────────────────────────────────────────── */
+    .pika-single { font-family: inherit; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; color: #eaeaea; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 9999; }
+    .pika-title { background: #0f3460; padding: 6px; border-radius: 8px 8px 0 0; }
+    .pika-label { color: #eaeaea; font-weight: 600; }
+    .pika-prev, .pika-next { color: #eaeaea; opacity: 0.7; }
+    .pika-prev:hover, .pika-next:hover { opacity: 1; }
+    .pika-table th { color: #888; font-size: 0.75rem; }
+    .pika-button { background: none; color: #eaeaea; border-radius: 4px; }
+    .pika-button:hover { background: #0f3460 !important; color: #fff !important; }
+    .is-selected .pika-button { background: #e94560 !important; color: #fff !important; box-shadow: none; }
+    .is-today .pika-button { color: #e94560; font-weight: 700; }
+    .pika-select { background: #1a1a2e; color: #eaeaea; border: 1px solid #0f3460; border-radius: 4px; }
   </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pikaday/css/pikaday.css" crossorigin="anonymous">
 </head>
 <body>
 
@@ -2188,6 +2202,40 @@ async function saveLsQty(numericId) {
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 init();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/pikaday/pikaday.js" crossorigin="anonymous"></script>
+<script>
+  // Initialize Pikaday on all date inputs
+  function makePicker(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const picker = new Pikaday({
+      field: el,
+      format: 'YYYY-MM-DD',
+      toString(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      },
+      parse(dateString) {
+        const [y, m, d] = dateString.split('-').map(Number);
+        return new Date(y, m - 1, d);
+      },
+      onSelect() {
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      },
+    });
+    return picker;
+  }
+
+  // Run after DOM is ready (all modals exist in DOM from the start)
+  makePicker('last-upgrade-date');
+  makePicker('m-start-date');
+  makePicker('m-last-upgrade');
+  makePicker('pm-start-date');
+  makePicker('pm-last-upgrade');
 </script>
 </body>
 </html>
