@@ -1636,7 +1636,7 @@ function setLsFilter(f) {
 
 function renderLowStock() {
   const threshold = parseInt(document.getElementById('ls-threshold')?.value || 12, 10);
-  const outCount  = lsData.filter(p => p.qty === 0).length;
+  const outCount  = lsData.filter(p => p.qty <= 0).length;
   const lowCount  = lsData.filter(p => p.qty > 0 && p.qty <= threshold).length;
   const goodCount = lsData.filter(p => p.qty > threshold).length;
   document.getElementById('ls-summary').innerHTML =
@@ -1645,7 +1645,7 @@ function renderLowStock() {
     `<span>✅ <strong>${goodCount}</strong> healthy</span>`;
 
   let rows = lsData;
-  if      (lsFilter === 'out')       rows = lsData.filter(p => p.qty === 0);
+  if      (lsFilter === 'out')       rows = lsData.filter(p => p.qty <= 0);
   else if (lsFilter === 'low')       rows = lsData.filter(p => p.qty > 0 && p.qty <= threshold);
   else if (lsFilter === 'regular')   rows = lsData.filter(p => p.isRegular);
   else if (lsFilter === 'collector') rows = lsData.filter(p => p.isCollector);
@@ -1657,7 +1657,7 @@ function renderLowStock() {
   }
   tbody.innerHTML = rows.map(p => {
     let badge, statusText;
-    if (p.qty === 0) {
+    if (p.qty <= 0) {
       badge = 'badge-red'; statusText = 'OUT OF STOCK';
     } else if (p.qty <= threshold) {
       badge = 'badge-yellow'; statusText = 'LOW';
