@@ -5,6 +5,7 @@ Embedded Shopify app for Pandora's Deck Box. Generates randomized MTG booster pa
 - **Chaos Club** — 3 / 6 / 9 / 12 pack subscriptions with D20 collector upgrade system
 - **Chaos Draft Kit** — 12 regular + 1 collector pack
 - **Advent Calendar** — 23 regular + 1 collector pack
+- **Pack of the Month** — monthly single-pack subscriptions with collector upgrade milestones
 
 Outputs a printable DOCX packing slip, tracks Chaos Club subscribers, and can auto-generate bundles when subscription orders are paid via webhook.
 
@@ -158,6 +159,14 @@ npm start
 
 ## How It Works
 
+### Pack of the Month (POTM)
+- Monthly single-pack subscriptions tracked independently from Chaos Club
+- Each subscriber has a month count, upgrade interval (default 6), and last upgrade date
+- **Collector upgrade**: when `months_renewed % upgrade_interval === 0`, the subscriber is flagged for a Collector Booster pack
+- **Manual renewal**: use the **+1 Month** button in the Pack of Month tab — it increments the month count and immediately alerts you if an upgrade is due
+- **Webhook renewal**: if the POTM Product ID is configured in Settings, paying a POTM order auto-increments the subscriber's month count silently (no alert — use the manual button for real-time notification)
+- Subscribers can be imported from a CSV via the Import button
+
 ### D20 Upgrade System (Chaos Club)
 - Every bundle generation for Chaos Club rolls a d20
 - Roll of **20** = one pack is upgraded from regular to collector tier
@@ -166,10 +175,10 @@ npm start
 
 ### Bundle Scoring
 Bundles are scored on:
-1. **Margin proximity** — how close the total cost gets to the target margin
-2. **Variety** — penalty for repeating the same pack more than once
+1. **Margin proximity** — how close the total cost gets to the target margin (ideal margin earns max points, over-margin is slightly rewarded, under-minimum is penalized)
+2. **Variety bonus** — points added for having packs spread across different price buckets (`unique price tiers × 3`)
 
-200 attempts are made (300 for Advent) and the best-scoring bundle is returned.
+Up to 200 attempts are made per bundle (300 for Advent) and the best-scoring result is returned. Generation exits early once the minimum margin threshold is first met.
 
 ### Auto-Webhook
 When an `orders/paid` webhook fires:
@@ -177,7 +186,9 @@ When an `orders/paid` webhook fires:
 2. If found, the subscriber is looked up by Shopify customer ID
 3. A bundle is generated and inventory is **immediately decremented** (not a dry run)
 4. The bundle is saved to history
-5. The subscriber's `months_renewed` counter is updated
+5. The subscriber's `months_renewed` counter is updated, and if a D20 upgrade occurred, `collector_upgrade_count` and `last_upgrade_date` are also recorded
+
+The webhook also checks for the configured Pack of the Month Product ID. If found, the matching POTM subscriber's month count is incremented and their collector upgrade milestone is checked (see below).
 
 The DOCX packing slip must be downloaded manually from the History tab after the webhook fires.
 
@@ -193,7 +204,7 @@ server.js           — Express server, OAuth, all API routes, webhook handler
 database.js         — PostgreSQL + SQLite dual-database abstraction
 bundleGenerator.js  — Bundle generation logic (ported from chaos_club_generator.py)
 docxGenerator.js    — DOCX packing slip generation
-public/index.html   — Single-page embedded app UI (5 tabs)
+public/index.html   — Single-page embedded app UI (7 tabs: Generate, Products, Settings, Subscribers, History, Low Stock, Pack of Month)
 ```
 
 ---
