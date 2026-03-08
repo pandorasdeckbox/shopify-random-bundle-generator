@@ -483,6 +483,9 @@ export async function updateInventory(shopifyApiInstance, session, packs, dryRun
     aggregated[itemId].qty++;
   }
 
+  const mode = dryRun ? 'DRY RUN' : 'LIVE';
+  console.log(`[${new Date().toISOString()}] 📦 [INVENTORY/${mode}] Processing ${Object.keys(aggregated).length} distinct item(s) across ${packs.length} pack(s)`);
+
   const results = [];
   const client = new shopifyApiInstance.clients.Rest({ session });
 
@@ -498,6 +501,7 @@ export async function updateInventory(shopifyApiInstance, session, packs, dryRun
 
       const levels = levelsResp.body.inventory_levels;
       if (!levels || !levels.length) {
+        console.warn(`[${new Date().toISOString()}] ⚠️  [INVENTORY/${mode}] No inventory level found for: ${item.product_title}`);
         results.push({ name: item.product_title, success: false, reason: 'No inventory level found' });
         continue;
       }
@@ -507,11 +511,13 @@ export async function updateInventory(shopifyApiInstance, session, packs, dryRun
       const newQty = currentQty - item.qty;
 
       if (dryRun) {
+        console.log(`[${new Date().toISOString()}] 🔍 [INVENTORY/DRY RUN] "${item.product_title}": ${currentQty} → ${newQty} (would remove ${item.qty}) [NO CHANGE]`);
         results.push({ name: item.product_title, success: true, dryRun: true, from: currentQty, to: newQty, qty: item.qty });
         continue;
       }
 
       // Apply adjustment
+      console.log(`[${new Date().toISOString()}] 🔧 [INVENTORY/LIVE] "${item.product_title}": ${currentQty} → ${newQty} (removing ${item.qty}) @ location ${locationId}`);
       await client.post({
         path: 'inventory_levels/adjust',
         data: {
@@ -521,8 +527,11 @@ export async function updateInventory(shopifyApiInstance, session, packs, dryRun
         },
       });
 
-      results.push({ name: item.product_title, success: true, from: currentQty, to: newQty, qty: item.qty, lowStock: newQty < 6 });
+      const lowStock = newQty < 6;
+      console.log(`[${new Date().toISOString()}] ✅ [INVENTORY/LIVE] "${item.product_title}": adjusted to ${newQty}${lowStock ? ' ⚠️  LOW STOCK' : ''}`);
+      results.push({ name: item.product_title, success: true, from: currentQty, to: newQty, qty: item.qty, lowStock });
     } catch (err) {
+      console.error(`[${new Date().toISOString()}] ❌ [INVENTORY/${mode}] Failed for "${item.product_title}": ${err.message}`);
       results.push({ name: item.product_title, success: false, reason: err.message });
     }
 

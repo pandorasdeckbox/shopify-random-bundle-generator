@@ -73,6 +73,15 @@ if (missing.length) {
 await initDatabase();
 
 // db.js exports sessionStorage after initDatabase() populates it
+
+// ─── Logger ────────────────────────────────────────────────────────────────────
+function log(level, msg, data = {}) {
+  const ts = new Date().toISOString();
+  const icons = { INFO: '📋', WARN: '⚠️ ', ERROR: '❌', SUCCESS: '✅', DEBUG: '🔍' };
+  const icon = icons[level] ?? '  ';
+  const dataStr = Object.keys(data).length ? ' ' + JSON.stringify(data) : '';
+  console.log(`[${ts}] ${icon} [${level}] ${msg}${dataStr}`);
+}
 import { sessionStorage } from './database.js';
 
 const app = express();
@@ -122,11 +131,14 @@ app.get('/app', async (req, res) => {
   const { shop, host } = req.query;
   if (!shop) return res.status(400).send('Missing shop parameter');
 
-  const session = await sessionStorage.loadSession(`offline_${shop}`);
+  const sanitizedShop = shopify.utils.sanitizeShop(shop);
+  if (!sanitizedShop) return res.status(400).send('Invalid shop parameter');
+
+  const session = await sessionStorage.loadSession(`offline_${sanitizedShop}`);
   if (!session) {
     // Must break out of Shopify's iframe before redirecting to OAuth
-    const authUrl = `/auth?shop=${shop}${host ? `&host=${host}` : ''}`;
-    return res.send(`<!DOCTYPE html><html><head><script>window.top.location.href='${authUrl}';<\/script></head><body>Redirecting...</body></html>`);
+    const authUrl = `/auth?shop=${encodeURIComponent(sanitizedShop)}${host ? `&host=${encodeURIComponent(String(host))}` : ''}`;
+    return res.send(`<!DOCTYPE html><html><head><script>window.top.location.href=${JSON.stringify(authUrl)};<\/script></head><body>Redirecting...</body></html>`);
   }
 
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -137,8 +149,10 @@ app.get('/app', async (req, res) => {
 app.get('/exitiframe', (req, res) => {
   const { shop } = req.query;
   if (!shop) return res.status(400).send('Missing shop parameter');
-  const redirectUri = `https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}/auth?shop=${shop}`;
-  res.send(`<!DOCTYPE html><html><head><script>window.top.location.href='${redirectUri}';</script></head><body>Redirecting...</body></html>`);
+  const sanitizedShop = shopify.utils.sanitizeShop(shop);
+  if (!sanitizedShop) return res.status(400).send('Invalid shop parameter');
+  const redirectUri = `https://${sanitizedShop}/admin/apps/${process.env.SHOPIFY_API_KEY}/auth?shop=${encodeURIComponent(sanitizedShop)}`;
+  res.send(`<!DOCTYPE html><html><head><script>window.top.location.href=${JSON.stringify(redirectUri)};</script></head><body>Redirecting...</body></html>`);
 });
 
 // ─── OAuth ────────────────────────────────────────────────────────────────────
@@ -211,14 +225,19 @@ app.get('/auth/callback', async (req, res) => {
 // ─── Session Middleware ───────────────────────────────────────────────────────
 
 async function verifySession(req, res, next) {
-  const shop = req.query.shop || req.body?.shop;
-  if (!shop) return res.status(401).json({ error: 'Missing shop parameter', needsReauth: true });
+  const rawShop = req.query.shop || req.body?.shop;
+  if (!rawShop) return res.status(401).json({ error: 'Missing shop parameter', needsReauth: true });
+
+  const shop = shopify.utils.sanitizeShop(rawShop);
+  if (!shop) return res.status(401).json({ error: 'Invalid shop parameter', needsReauth: true });
 
   const session = await sessionStorage.loadSession(`offline_${shop}`);
   if (!session) {
-    return res.status(401).json({ error: 'No session found', needsReauth: true, authUrl: `/auth?shop=${shop}` });
+    log('WARN', `No session found for shop: ${shop}`);
+    return res.status(401).json({ error: 'No session found', needsReauth: true, authUrl: `/auth?shop=${encodeURIComponent(shop)}` });
   }
 
+  log('INFO', `Session verified`, { shop });
   req.shopifySession = session;
   next();
 }
@@ -299,6 +318,8 @@ app.post('/api/generate', verifySession, async (req, res) => {
       dry_run = true,
     } = req.body;
 
+    log('INFO', `Bundle generation requested`, { shop, bundle_type, pack_count, subscriber_id, dry_run, customer_name });
+
     const settings = await getSettings(shop);
 
     // If subscriber_id provided, merge subscriber defaults
@@ -344,11 +365,43 @@ app.post('/api/generate', verifySession, async (req, res) => {
     }
 
     if (!result) {
+      log('WARN', `Bundle generation failed — no valid bundle found`, { shop, bundle_type, pack_count: resolvedPackCount });
       return res.status(422).json({ error: 'Could not generate a bundle meeting margin requirements. Check product inventory and pricing.' });
+    }
+
+    // Log generated bundle details
+    log('INFO', `Bundle generated`, {
+      bundle_type,
+      customer: resolvedName,
+      packs: result.packs.length,
+      margin_pct: result.metrics.margin_percent?.toFixed(1) + '%',
+      total_cost: result.metrics.total_cost?.toFixed(2),
+      total_retail: result.metrics.total_retail?.toFixed(2),
+      target_price: result.metrics.target_price?.toFixed(2),
+      d20: result.d20Result?.roll ?? null,
+      d20_upgraded: result.d20Result?.upgraded ?? false,
+      dry_run,
+    });
+    for (const pack of result.packs) {
+      log('DEBUG', `  Pack: ${pack.product_title}`, { cost: pack.cost, retail: pack.retail, collector: !!pack.isCollector });
     }
 
     // Update inventory (or dry run)
     const inventoryResults = await updateInventory(shopify, req.shopifySession, result.packs, dry_run);
+    const invFailed = inventoryResults.filter(r => !r.success);
+    log(dry_run ? 'INFO' : 'SUCCESS', `Inventory ${dry_run ? 'dry-run' : 'LIVE update'} complete`, {
+      updated: inventoryResults.filter(r => r.success).length,
+      failed: invFailed.length,
+      results: inventoryResults.map(r => ({
+        name: r.name,
+        success: r.success,
+        ...(r.success ? { from: r.from, to: r.to, qty: r.qty } : { reason: r.reason }),
+        ...(r.lowStock ? { lowStock: true } : {}),
+      })),
+    });
+    if (invFailed.length) {
+      log('WARN', `${invFailed.length} inventory update(s) failed`, { failed: invFailed.map(r => ({ name: r.name, reason: r.reason })) });
+    }
 
     // Persist bundle to history
     const d20Result = result.d20Result;
@@ -376,6 +429,7 @@ app.post('/api/generate', verifySession, async (req, res) => {
           collector_upgrade_count: (sub.collector_upgrade_count || 0) + 1,
           last_upgrade_date: new Date().toISOString().slice(0, 10),
         });
+        log('INFO', `D20 upgrade recorded for subscriber`, { subscriber_id, roll: d20Result.roll });
       }
     }
 
@@ -387,8 +441,11 @@ app.post('/api/generate', verifySession, async (req, res) => {
           ...sub,
           months_renewed: (sub.months_renewed || 0) + 1,
         });
+        log('INFO', `months_renewed incremented to ${(sub.months_renewed || 0) + 1}`, { subscriber_id });
       }
     }
+
+    log('SUCCESS', `Bundle #${saved.id} saved${dry_run ? ' [DRY RUN]' : ' [LIVE]'}`, { bundle_id: saved.id, customer: resolvedName });
 
     res.json({
       success: true,
@@ -494,7 +551,7 @@ app.post('/api/inventory/set', verifySession, async (req, res) => {
       return res.status(400).json({ error: 'inventory_item_id and quantity are required' });
     }
     const qty = parseInt(quantity, 10);
-    if (isNaN(qty) || qty < 0) return res.status(400).json({ error: 'Invalid quantity' });
+    if (isNaN(qty) || qty < 0 || qty > 99999) return res.status(400).json({ error: 'Invalid quantity' });
 
     const numericId = gidToNumeric(inventory_item_id);
     const client = new shopify.clients.Rest({ session: req.shopifySession });
@@ -506,6 +563,9 @@ app.post('/api/inventory/set', verifySession, async (req, res) => {
     const levels = levelsResp.body?.inventory_levels;
     if (!levels?.length) return res.status(404).json({ error: 'No inventory level found' });
 
+    const currentQty = levels[0].available;
+    log('INFO', `Manual inventory set requested`, { inventory_item_id, current_qty: currentQty, new_qty: qty, location_id: levels[0].location_id });
+
     await client.post({
       path: 'inventory_levels/set',
       data: {
@@ -515,6 +575,7 @@ app.post('/api/inventory/set', verifySession, async (req, res) => {
       },
     });
 
+    log('SUCCESS', `Manual inventory set complete`, { inventory_item_id, from: currentQty, to: qty });
     res.json({ success: true, available: qty });
   } catch (err) {
     console.error('Error setting inventory:', err.message);
@@ -676,7 +737,7 @@ app.post('/api/subscribers/import', verifySession, async (req, res) => {
   try {
     const shop = req.shopifySession.shop;
     const { candidates } = req.body;
-    if (!Array.isArray(candidates) || !candidates.length) {
+    if (!Array.isArray(candidates) || !candidates.length || candidates.length > 500) {
       return res.status(400).json({ error: 'No candidates provided' });
     }
 
@@ -769,7 +830,8 @@ app.post('/webhooks/orders-paid', async (req, res) => {
   // Process asynchronously
   try {
     const order = JSON.parse(req.body.toString());
-    const shop = req.headers['x-shopify-shop-domain'];
+    const rawShop = req.headers['x-shopify-shop-domain'];
+    const shop = rawShop ? shopify.utils.sanitizeShop(rawShop) : null;
 
     if (!shop || !order) return;
 
