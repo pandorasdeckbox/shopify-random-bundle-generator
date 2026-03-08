@@ -161,7 +161,7 @@ npm start
 ### D20 Upgrade System (Chaos Club)
 - Every bundle generation for Chaos Club rolls a d20
 - Roll of **20** = one pack is upgraded from regular to collector tier
-- **Luck protection**: if it's been 12+ months since the last upgrade, any roll of **15 or higher** triggers an upgrade
+- **Luck protection**: if it's been 12+ months since the last upgrade, **any roll** triggers an upgrade
 - The upgrade date is tracked per subscriber and factored in automatically
 
 ### Bundle Scoring
