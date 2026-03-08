@@ -616,19 +616,14 @@
       <strong>Last Upgrade Date must be set manually after import.</strong>
     </p>
     <!-- Product picker (type-to-search) -->
-    <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:14px;position:relative;">
-      <div style="flex:1;position:relative;">
+    <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:14px;">
+      <div style="flex:1;">
         <input type="text" id="import-product-search" placeholder="Type to search products…"
           autocomplete="off"
           oninput="filterImportProducts()"
           onfocus="showImportDropdown()"
           style="width:100%;box-sizing:border-box;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:0.9rem;">
         <input type="hidden" id="import-product-gid">
-        <div id="import-product-dropdown"
-          style="display:none;position:absolute;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;
-                 background:var(--surface2);border:1px solid var(--border);border-radius:0 0 6px 6px;
-                 z-index:1000;box-shadow:0 4px 16px rgba(0,0,0,0.4);">
-        </div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="runImportPreview()" style="white-space:nowrap;">🔍 Find Orders</button>
     </div>
@@ -1284,17 +1279,34 @@ function filterImportProducts() {
 }
 
 function showImportDropdown(q = '') {
-  const dropdown = document.getElementById('import-product-dropdown');
   if (!importProductList.length) return;
-  const search = q || document.getElementById('import-product-search').value.toLowerCase();
+  const input = document.getElementById('import-product-search');
+  const search = q || input.value.toLowerCase();
   const matches = search
     ? importProductList.filter(p => p.title.toLowerCase().includes(search)).slice(0, 30)
     : importProductList.slice(0, 30);
+
+  // Reuse or create a fixed-position dropdown appended to body so modal overflow can't clip it
+  let dropdown = document.getElementById('import-product-dropdown');
+  if (!dropdown) {
+    dropdown = document.createElement('div');
+    dropdown.id = 'import-product-dropdown';
+    dropdown.style.cssText = 'position:fixed;z-index:99999;max-height:220px;overflow-y:auto;background:var(--surface2);border:1px solid var(--border);border-radius:0 0 6px 6px;box-shadow:0 4px 24px rgba(0,0,0,0.6);';
+    document.body.appendChild(dropdown);
+  }
+
   if (!matches.length) { dropdown.style.display = 'none'; return; }
+
+  // Position directly under the input
+  const rect = input.getBoundingClientRect();
+  dropdown.style.top = rect.bottom + 'px';
+  dropdown.style.left = rect.left + 'px';
+  dropdown.style.width = rect.width + 'px';
+
   dropdown.innerHTML = matches.map(p =>
-    `<div class="import-product-option" data-id="${p.id}" data-title="${p.title.replace(/"/g,'&quot;')}"
+    `<div class="import-product-option" data-id="${p.id}"
       style="padding:8px 12px;cursor:pointer;font-size:0.88rem;border-bottom:1px solid var(--border)"
-      onmousedown="selectImportProduct('${p.id}','${p.title.replace(/'/g,'\\\'')}')"
+      onmousedown="selectImportProduct('${p.id}','${p.title.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')"
       onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background=''">${p.title}</div>`
   ).join('');
   dropdown.style.display = 'block';
