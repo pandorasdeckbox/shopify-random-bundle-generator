@@ -612,13 +612,20 @@
   <div class="modal" style="max-width:700px;width:95%">
     <h2 style="margin-top:0">Import Subscribers from Order History</h2>
     <p style="color:var(--muted);margin-top:0;font-size:0.9rem;">
-      Searches your order history for the Chaos Club product and creates subscriber records.
-      Review the matches below before importing. <strong>Last Upgrade Date must be set manually after import.</strong>
+      Select your Chaos Club subscription product, then search your order history to create subscriber records.
+      <strong>Last Upgrade Date must be set manually after import.</strong>
     </p>
+    <!-- Product picker -->
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">
+      <select id="import-product-select" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:0.9rem;">
+        <option value="">— Select Chaos Club product… —</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="runImportPreview()">🔍 Find Orders</button>
+    </div>
     <div id="import-loading" class="loading" style="display:none"><div class="spinner"></div></div>
     <div id="import-results" style="display:none">
       <div id="import-summary" style="margin-bottom:12px;font-size:0.9rem;color:var(--muted)"></div>
-      <div class="table-wrap" style="max-height:320px;overflow-y:auto">
+      <div class="table-wrap" style="max-height:300px;overflow-y:auto">
         <table>
           <thead>
             <tr>
@@ -636,9 +643,7 @@
       </div>
       <div id="import-alert" style="margin-top:12px"></div>
     </div>
-    <div id="import-empty" style="display:none;text-align:center;padding:32px;color:var(--muted)">
-      No Chaos Club orders found. Make sure the Chaos Club Product GID is set in Settings.
-    </div>
+    <div id="import-empty" style="display:none;text-align:center;padding:24px;color:var(--muted)"></div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeImportModal()">Cancel</button>
       <button id="import-confirm-btn" class="btn btn-primary" onclick="confirmImport()" style="display:none">Import Selected</button>
@@ -1262,6 +1267,27 @@ let importCandidates = [];
 
 async function openImportModal() {
   document.getElementById('import-modal').style.display = 'flex';
+  document.getElementById('import-loading').style.display = 'none';
+  document.getElementById('import-results').style.display = 'none';
+  document.getElementById('import-empty').style.display = 'none';
+  document.getElementById('import-confirm-btn').style.display = 'none';
+  importCandidates = [];
+
+  // Populate product picker — use all loaded products, falling back to a fresh fetch
+  const products = allProducts.length ? allProducts : (await api('/api/products').then(d => d.products).catch(() => []));
+  const sel = document.getElementById('import-product-select');
+  sel.innerHTML = '<option value="">— Select Chaos Club product… —</option>' +
+    products.map(p => `<option value="${p.id}">${p.title}</option>`).join('');
+
+  // Pre-select if already set in settings
+  const savedGid = currentSettings.chaos_club_product_id;
+  if (savedGid) sel.value = savedGid;
+}
+
+async function runImportPreview() {
+  const productGid = document.getElementById('import-product-select').value;
+  if (!productGid) { alert('Please select a product first.'); return; }
+
   document.getElementById('import-loading').style.display = 'block';
   document.getElementById('import-results').style.display = 'none';
   document.getElementById('import-empty').style.display = 'none';
@@ -1269,11 +1295,12 @@ async function openImportModal() {
   importCandidates = [];
 
   try {
-    const { candidates } = await api('/api/subscribers/import-preview');
+    const { candidates } = await api(`/api/subscribers/import-preview?product_gid=${encodeURIComponent(productGid)}`);
     importCandidates = candidates || [];
 
     if (!importCandidates.length) {
       document.getElementById('import-empty').style.display = 'block';
+      document.getElementById('import-empty').textContent = 'No orders found for this product.';
     } else {
       renderImportCandidates();
       document.getElementById('import-results').style.display = 'block';

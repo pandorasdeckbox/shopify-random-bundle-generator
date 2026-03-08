@@ -499,9 +499,10 @@ app.get('/api/subscribers/import-preview', verifySession, async (req, res) => {
   try {
     const shop = req.shopifySession.shop;
     const settings = await getSettings(shop);
-    const chaosProductId = settings.chaos_club_product_id;
+    // Accept product_gid as a query param override (allows picking in modal without Settings pre-config)
+    const chaosProductId = req.query.product_gid || settings.chaos_club_product_id;
     if (!chaosProductId) {
-      return res.status(400).json({ error: 'Chaos Club Product GID not set. Configure it in Settings first.' });
+      return res.status(400).json({ error: 'No product selected.' });
     }
 
     // Extract numeric ID from GID
