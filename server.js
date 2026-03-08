@@ -508,30 +508,31 @@ app.get('/api/subscribers/import-preview', verifySession, async (req, res) => {
     // Extract numeric ID from GID
     const numericId = String(chaosProductId).split('/').pop();
 
-    // Paginate through all orders containing this product
+    // Paginate through ALL orders (created_at_min goes back far enough to catch old subscriptions)
     const client = new shopify.clients.Rest({ session: req.shopifySession });
     const orderMap = new Map(); // customer_id -> aggregated data
 
     let pageInfo = null;
     do {
-      const params = { limit: 250, status: 'any', fields: 'id,created_at,customer,line_items' };
-      if (pageInfo) params.page_info = pageInfo;
+      const params = pageInfo
+        ? { page_info: pageInfo, limit: 250 }
+        : { limit: 250, status: 'any', created_at_min: '2018-01-01T00:00:00Z', fields: 'id,created_at,customer,line_items' };
 
       const response = await client.get({ path: 'orders', query: params });
       const orders = response.body.orders || [];
 
       for (const order of orders) {
         if (!order.customer) continue;
-        const hasProduct = (order.line_items || []).some(
-          li => String(li.product_id) === numericId
-        );
-        if (!hasProduct) continue;
+        const lineItem = (order.line_items || []).find(li => String(li.product_id) === numericId);
+        if (!lineItem) continue;
 
         const custId = String(order.customer.id);
         const orderDate = new Date(order.created_at);
-        const packQty = (order.line_items || []).find(li => String(li.product_id) === numericId)?.quantity || 3;
-        // Snap to nearest valid tier
-        const snapPack = packQty <= 3 ? 3 : packQty <= 6 ? 6 : packQty <= 9 ? 9 : 12;
+
+        // Parse pack count from variant title (e.g. "6 Pack", "6-Pack", "9 Pack")
+        const variantTitle = lineItem.variant_title || '';
+        const variantNum = parseInt(variantTitle.match(/\d+/)?.[0] || '0', 10);
+        const snapPack = variantNum === 9 ? 9 : variantNum === 12 ? 12 : variantNum === 6 ? 6 : 3;
 
         if (!orderMap.has(custId)) {
           orderMap.set(custId, {
@@ -552,9 +553,11 @@ app.get('/api/subscribers/import-preview', verifySession, async (req, res) => {
         }
       }
 
-      // Check for next page via Link header
-      const linkHeader = response.headers?.get?.('link') || '';
-      const nextMatch = linkHeader.match(/<[^>]+page_info=([^>&"]+)[^>]*>;\s*rel="next"/);
+      // Link header can be a Headers object or a plain string depending on adapter version
+      const rawLink = typeof response.headers?.get === 'function'
+        ? response.headers.get('link')
+        : (response.headers?.link ?? response.headers?.['link'] ?? '');
+      const nextMatch = (rawLink || '').match(/<[^>]+page_info=([^>&"]+)[^>]*>;\s*rel="next"/);
       pageInfo = nextMatch ? nextMatch[1] : null;
     } while (pageInfo);
 
