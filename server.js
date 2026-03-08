@@ -48,6 +48,7 @@ import {
   generateDraftKitBundle,
   updateInventory,
   calculateMonthsSince,
+  gidToNumeric,
 } from './bundleGenerator.js';
 
 import { generateBundleDocx, generateBundleDocxFromTemplate, bundleFilename } from './docxGenerator.js';
@@ -481,6 +482,43 @@ app.delete('/api/template', verifySession, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete template' });
+  }
+});
+
+// ─── API: Inventory ───────────────────────────────────────────────────────────
+
+app.post('/api/inventory/set', verifySession, async (req, res) => {
+  try {
+    const { inventory_item_id, quantity } = req.body;
+    if (!inventory_item_id || quantity === undefined || quantity === null) {
+      return res.status(400).json({ error: 'inventory_item_id and quantity are required' });
+    }
+    const qty = parseInt(quantity, 10);
+    if (isNaN(qty) || qty < 0) return res.status(400).json({ error: 'Invalid quantity' });
+
+    const numericId = gidToNumeric(inventory_item_id);
+    const client = new shopify.clients.Rest({ session: req.shopifySession });
+
+    const levelsResp = await client.get({
+      path: 'inventory_levels',
+      query: { inventory_item_ids: numericId },
+    });
+    const levels = levelsResp.body?.inventory_levels;
+    if (!levels?.length) return res.status(404).json({ error: 'No inventory level found' });
+
+    await client.post({
+      path: 'inventory_levels/set',
+      data: {
+        location_id: levels[0].location_id,
+        inventory_item_id: parseInt(numericId),
+        available: qty,
+      },
+    });
+
+    res.json({ success: true, available: qty });
+  } catch (err) {
+    console.error('Error setting inventory:', err.message);
+    res.status(500).json({ error: 'Failed to set inventory: ' + err.message });
   }
 });
 

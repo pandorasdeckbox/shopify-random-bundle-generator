@@ -58,6 +58,9 @@ export async function fetchAllProducts(client) {
           priceRangeV2 {
             minVariantPrice { amount }
           }
+          variants(first: 1) {
+            nodes { inventoryItem { id } }
+          }
         }
       }
     }
@@ -70,7 +73,10 @@ export async function fetchAllProducts(client) {
   while (hasNextPage) {
     const response = await client.request(query, { variables: { cursor } });
     const { nodes, pageInfo } = response.data.products;
-    allProducts.push(...nodes);
+    allProducts.push(...nodes.map(p => ({
+      ...p,
+      inventoryItemId: p.variants?.nodes[0]?.inventoryItem?.id || null,
+    })));
     hasNextPage = pageInfo.hasNextPage;
     cursor = pageInfo.endCursor;
   }
