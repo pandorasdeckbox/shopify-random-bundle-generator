@@ -262,17 +262,59 @@
     .history-id { color: var(--muted); font-size: 0.8rem; width: 32px; }
 
     /* ── Pikaday calendar theme ───────────────────────────────────────────── */
-    .pika-single { font-family: inherit; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; color: #eaeaea; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 9999; }
-    .pika-title { background: #0f3460; padding: 6px; border-radius: 8px 8px 0 0; }
-    .pika-label { color: #eaeaea; font-weight: 600; }
-    .pika-prev, .pika-next { color: #eaeaea; opacity: 0.7; }
+    .pika-single {
+      font-family: var(--font);
+      background: var(--surface);
+      border: 1px solid var(--accent2);
+      border-radius: var(--radius);
+      color: var(--text);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+      z-index: 9999;
+      padding: 4px;
+    }
+    .pika-title {
+      background: var(--accent2);
+      padding: 8px 6px;
+      border-radius: calc(var(--radius) - 2px) calc(var(--radius) - 2px) 0 0;
+      margin: -4px -4px 4px -4px;
+    }
+    .pika-label { color: var(--text); font-weight: 700; font-size: 0.95rem; }
+    .pika-label:hover { color: var(--accent); }
+    .pika-prev, .pika-next { color: var(--text); opacity: 0.6; transition: opacity 0.15s; }
     .pika-prev:hover, .pika-next:hover { opacity: 1; }
-    .pika-table th { color: #888; font-size: 0.75rem; }
-    .pika-button { background: none; color: #eaeaea; border-radius: 4px; }
-    .pika-button:hover { background: #0f3460 !important; color: #fff !important; }
-    .is-selected .pika-button { background: #e94560 !important; color: #fff !important; box-shadow: none; }
-    .is-today .pika-button { color: #e94560; font-weight: 700; }
-    .pika-select { background: #1a1a2e; color: #eaeaea; border: 1px solid #0f3460; border-radius: 4px; }
+    .pika-table thead tr { border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .pika-table th {
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      padding: 4px 0;
+      text-transform: uppercase;
+    }
+    .pika-table td { padding: 2px; }
+    .pika-button {
+      background: transparent;
+      color: var(--text);
+      border-radius: 6px;
+      font-size: 0.88rem;
+      text-align: center;
+      padding: 5px 4px;
+      transition: background 0.1s, color 0.1s;
+      width: 100%;
+    }
+    .pika-button:hover { background: var(--accent2) !important; color: #fff !important; }
+    .is-today .pika-button { color: var(--accent); font-weight: 700; box-shadow: inset 0 0 0 1px var(--accent); }
+    .is-selected .pika-button { background: var(--accent) !important; color: #fff !important; font-weight: 700; box-shadow: none; }
+    .is-outside-current-month .pika-button { color: var(--muted); opacity: 0.45; }
+    .is-disabled .pika-button { color: var(--muted); opacity: 0.25; cursor: default; }
+    .pika-select {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--accent2);
+      border-radius: 4px;
+      padding: 2px 4px;
+      font-size: 0.85rem;
+    }
   </style>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pikaday/css/pikaday.css" crossorigin="anonymous">
 </head>
