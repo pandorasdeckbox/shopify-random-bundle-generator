@@ -379,8 +379,8 @@ app.post('/api/generate', verifySession, async (req, res) => {
       }
     }
 
-    // If subscriber, increment months_renewed
-    if (subscriber_id) {
+    // If subscriber and LIVE run, increment months_renewed
+    if (subscriber_id && !dry_run) {
       const sub = await getSubscriber(shop, subscriber_id);
       if (sub) {
         await updateSubscriber(shop, subscriber_id, {
