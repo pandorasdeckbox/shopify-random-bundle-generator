@@ -1528,6 +1528,8 @@ function renderSubscribers(subs) {
 function openSubscriberModal(id) {
   const modal = document.getElementById('sub-modal');
   document.getElementById('modal-alert').innerHTML = '';
+  const btn = document.getElementById('subscriber-save-btn');
+  btn.disabled = false; btn.textContent = 'Save';
 
   if (id) {
     const s = subscribers.find(s => s.id === id);
@@ -1665,6 +1667,8 @@ function renderPotmSubscribers(subs) {
 
 function openPotmModal(id) {
   document.getElementById('potm-modal-alert').innerHTML = '';
+  const btn = document.getElementById('potm-save-btn');
+  btn.disabled = false; btn.textContent = 'Save';
   if (id) {
     const s = potmSubscribers.find(s => s.id === id);
     if (!s) return;
