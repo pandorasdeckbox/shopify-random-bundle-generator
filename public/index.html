@@ -387,12 +387,25 @@
     <div class="card">
       <h2>Product Configuration</h2>
       <p style="color:var(--muted); margin-bottom:16px; font-size:0.9rem;">
-        Check which Shopify products are eligible for each bundle type. Changes auto-save when you click Save.
+        Check which Shopify products are eligible for each bundle type. Filter by collection or tag to bulk-select groups of products.
       </p>
+      <!-- Row 1: text search + action buttons -->
       <div class="product-filter">
         <input type="text" id="product-search" placeholder="Search products…" oninput="filterProducts()">
         <button class="btn btn-secondary" onclick="loadProducts()">↺ Refresh</button>
         <button class="btn btn-primary" onclick="saveProductSettings()">💾 Save</button>
+      </div>
+      <!-- Row 2: collection/tag filters + bulk-check buttons -->
+      <div class="product-filter" style="margin-top:8px; flex-wrap:wrap; gap:8px;">
+        <select id="collection-filter" onchange="filterProducts()" style="flex:2; min-width:180px;">
+          <option value="">— All Collections —</option>
+        </select>
+        <select id="tag-filter" onchange="filterProducts()" style="flex:1; min-width:140px;">
+          <option value="">— All Tags —</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="bulkCheck('regular')" title="Mark all visible products as Regular Pack">✓ Regular</button>
+        <button class="btn btn-secondary btn-sm" onclick="bulkCheck('collector')" title="Mark all visible products as Collector Pack">✓ Collector</button>
+        <button class="btn btn-secondary btn-sm" onclick="bulkCheck('none')" title="Uncheck all visible products">✗ Clear</button>
       </div>
       <div id="products-loading" class="loading"><div class="spinner"></div><br>Loading products…</div>
       <div id="product-grid" class="product-grid"></div>
@@ -640,6 +653,7 @@ let currentBundleType = 'chaos_club';
 let currentPackCount = 6;
 let currentBundleId = null;
 let allProducts = [];
+let allCollections = [];
 let currentSettings = {};
 let subscribers = [];
 
@@ -875,18 +889,43 @@ async function loadProducts() {
   document.getElementById('products-loading').style.display = 'block';
   document.getElementById('product-grid').innerHTML = '';
   try {
-    const [{ products }, { settings }] = await Promise.all([
+    const [{ products }, { settings }, { collections }] = await Promise.all([
       api('/api/products'),
       api('/api/settings'),
+      api('/api/collections'),
     ]);
     allProducts = products;
+    allCollections = collections;
     currentSettings = settings;
+    populateCollectionFilter(collections);
+    populateTagFilter(products);
     renderProductGrid(products, settings);
   } catch(e) {
     showAlert('gen-alert', 'Failed to load products: ' + e.message);
   } finally {
     document.getElementById('products-loading').style.display = 'none';
   }
+}
+
+function populateCollectionFilter(collections) {
+  const sel = document.getElementById('collection-filter');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— All Collections —</option>' +
+    collections.map(c => `<option value="${c.id}">${c.title} (${c.productIds.length})</option>`).join('');
+  sel.value = current;
+}
+
+function populateTagFilter(products) {
+  const tagSet = new Set();
+  for (const p of products) {
+    if (p.tags) p.tags.forEach(t => tagSet.add(t));
+  }
+  const tags = [...tagSet].sort((a, b) => a.localeCompare(b));
+  const sel = document.getElementById('tag-filter');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— All Tags —</option>' +
+    tags.map(t => `<option value="${t}">${t}</option>`).join('');
+  sel.value = current;
 }
 
 function renderProductGrid(products, settings) {
@@ -897,7 +936,8 @@ function renderProductGrid(products, settings) {
     const stock = p.totalInventory ?? '?';
     const price = parseFloat(p.priceRangeV2?.minVariantPrice?.amount || 0).toFixed(2);
     const status = p.status === 'ACTIVE' ? '' : '<span class="badge badge-red">DRAFT</span>';
-    return `<div class="product-row" data-title="${p.title.toLowerCase()}" data-id="${p.id}">
+    const tagsAttr = (p.tags || []).join(',');
+    return `<div class="product-row" data-title="${p.title.toLowerCase()}" data-id="${p.id}" data-tags="${tagsAttr}">
       <div>
         <div style="font-weight:500">${p.title} ${status}</div>
         <div class="product-type">${p.productType || 'No type'} · $${price} · ${stock} in stock</div>
@@ -929,9 +969,42 @@ function renderProductGrid(products, settings) {
 
 function filterProducts() {
   const q = document.getElementById('product-search').value.toLowerCase();
+  const collectionId = document.getElementById('collection-filter').value;
+  const tag = document.getElementById('tag-filter').value;
+
+  // Build a set of product IDs for the selected collection (if any)
+  let collectionProductIds = null;
+  if (collectionId) {
+    const col = allCollections.find(c => c.id === collectionId);
+    collectionProductIds = col ? new Set(col.productIds) : new Set();
+  }
+
   document.querySelectorAll('.product-row').forEach(row => {
-    row.style.display = row.dataset.title.includes(q) ? '' : 'none';
+    const titleMatch = !q || row.dataset.title.includes(q);
+    const collectionMatch = !collectionProductIds || collectionProductIds.has(row.dataset.id);
+    const tagMatch = !tag || (row.dataset.tags || '').split(',').includes(tag);
+    row.style.display = (titleMatch && collectionMatch && tagMatch) ? '' : 'none';
   });
+}
+
+function bulkCheck(type) {
+  const visibleRows = [...document.querySelectorAll('.product-row')].filter(r => r.style.display !== 'none');
+  for (const row of visibleRows) {
+    const id = row.dataset.id;
+    const regCb = row.querySelector(`.regular-check[data-id="${id}"]`);
+    const colCb = row.querySelector(`.collector-check[data-id="${id}"]`);
+    if (!regCb || !colCb) continue;
+    if (type === 'regular') {
+      regCb.checked = true;
+      colCb.checked = false;
+    } else if (type === 'collector') {
+      colCb.checked = true;
+      regCb.checked = false;
+    } else {
+      regCb.checked = false;
+      colCb.checked = false;
+    }
+  }
 }
 
 async function saveProductSettings() {

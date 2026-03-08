@@ -53,6 +53,7 @@ export async function fetchAllProducts(client) {
           title
           status
           productType
+          tags
           totalInventory
           priceRangeV2 {
             minVariantPrice { amount }
@@ -75,6 +76,47 @@ export async function fetchAllProducts(client) {
   }
 
   return allProducts;
+}
+
+/**
+ * Fetch all Shopify collections with the IDs of their member products.
+ * Used by the Products tab to enable bulk-selection by collection.
+ */
+export async function fetchCollections(client) {
+  const query = `
+    query GetCollections($cursor: String) {
+      collections(first: 50, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          title
+          products(first: 250) {
+            nodes { id }
+          }
+        }
+      }
+    }
+  `;
+
+  const allCollections = [];
+  let cursor = null;
+  let hasNextPage = true;
+
+  while (hasNextPage) {
+    const response = await client.request(query, { variables: { cursor } });
+    const { nodes, pageInfo } = response.data.collections;
+    for (const col of nodes) {
+      allCollections.push({
+        id: col.id,
+        title: col.title,
+        productIds: col.products.nodes.map(p => p.id),
+      });
+    }
+    hasNextPage = pageInfo.hasNextPage;
+    cursor = pageInfo.endCursor;
+  }
+
+  return allCollections;
 }
 
 /**

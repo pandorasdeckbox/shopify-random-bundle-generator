@@ -39,6 +39,7 @@ import {
 import {
   fetchAllProducts,
   fetchBundleProducts,
+  fetchCollections,
   generateSubscriptionBundle,
   generateAdventBundle,
   generateDraftKitBundle,
@@ -241,6 +242,17 @@ app.get('/api/products', verifySession, async (req, res) => {
   } catch (err) {
     console.error('Error fetching products:', err.message);
     res.status(500).json({ error: 'Failed to fetch products' });
+  }
+});
+
+app.get('/api/collections', verifySession, async (req, res) => {
+  try {
+    const client = new shopify.clients.Graphql({ session: req.shopifySession });
+    const collections = await fetchCollections(client);
+    res.json({ collections });
+  } catch (err) {
+    console.error('Error fetching collections:', err.message);
+    res.status(500).json({ error: 'Failed to fetch collections' });
   }
 });
 
