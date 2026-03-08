@@ -194,8 +194,9 @@ app.get('/auth/callback', async (req, res) => {
 
     console.log('✅ OAuth complete for', sanitizedShop);
 
-    const host = req.query.host;
-    res.redirect(`/app?shop=${sanitizedShop}${host ? `&host=${host}` : ''}`);
+    // Redirect back into Shopify admin so the app re-embeds in the iframe.
+    // Going to /app standalone would load outside Shopify admin.
+    res.redirect(`https://${sanitizedShop}/admin/apps/${process.env.SHOPIFY_API_KEY}`);
   } catch (err) {
     console.error('OAuth callback error:', err.message);
     res.status(500).send('Authentication callback failed: ' + err.message);
