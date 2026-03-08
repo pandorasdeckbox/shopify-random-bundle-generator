@@ -1140,8 +1140,19 @@ async function loadSettings() {
     document.getElementById('s-max-collector').value = s.collector_upgrade_max_price || 50;
     document.getElementById('s-luck-months').value = s.luck_protection_months || 12;
     document.getElementById('s-chaos-product').value = s.chaos_club_product_id || '';
+    updatePackCountButtons(s);
     loadTemplateStatus();
   } catch(e) { /* silent on init */ }
+}
+
+function updatePackCountButtons(settings) {
+  const pricing = settings.subscription_pricing || {};
+  const defaults = { 3: 26, 6: 43, 9: 59, 12: 74 };
+  document.querySelectorAll('[data-count]').forEach(btn => {
+    const n = parseInt(btn.dataset.count, 10);
+    const price = pricing[n] ?? defaults[n] ?? '';
+    btn.textContent = `${n} — $${price}`;
+  });
 }
 
 async function saveSettings() {
@@ -1168,6 +1179,7 @@ async function saveSettings() {
   try {
     await api('/api/settings', { method: 'POST', body: { settings } });
     currentSettings = settings;
+    updatePackCountButtons(settings);
     showAlert('settings-alert', '✅ Settings saved!', 'success');
   } catch(e) {
     showAlert('settings-alert', 'Save failed: ' + e.message);
