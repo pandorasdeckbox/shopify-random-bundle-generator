@@ -1086,7 +1086,20 @@ async function loadSubscribersForDropdown() {
 function onSubscriberSelect() {
   const sel = document.getElementById('subscriber-select');
   const opt = sel.selectedOptions[0];
-  if (!opt || !opt.value) return;
+
+  // Always uncheck Dry Run regardless of subscriber choice
+  document.getElementById('dry-run').checked = false;
+
+  if (!opt || !opt.value) {
+    // Walk-in / Manual — uncheck D20, leave rest alone
+    document.getElementById('d20-enabled').checked = false;
+    toggleD20();
+    return;
+  }
+
+  // Real subscriber — enable D20 automatically
+  document.getElementById('d20-enabled').checked = true;
+  toggleD20();
 
   const packCount = parseInt(opt.dataset.pack) || 6;
   const lastUpgrade = opt.dataset.upgrade || '';
@@ -1114,6 +1127,20 @@ function onSubscriberSelect() {
 }
 
 async function generateBundle() {
+  const isDryRun = document.getElementById('dry-run').checked;
+
+  if (!isDryRun) {
+    const subscriberName = (() => {
+      const sel = document.getElementById('subscriber-select');
+      const opt = sel.selectedOptions[0];
+      return opt?.value ? opt.text.split(' (')[0] : (document.getElementById('customer-name').value.trim() || 'this customer');
+    })();
+    const confirmed = confirm(
+      `⚠️ LIVE RUN\n\nThis will generate a real bundle for ${subscriberName} and immediately decrement inventory.\n\nClick OK to proceed, or Cancel to go back.`
+    );
+    if (!confirmed) return;
+  }
+
   const btn = document.getElementById('generate-btn');
   btn.disabled = true;
   btn.textContent = '⏳ Generating…';
