@@ -982,6 +982,12 @@ let currentSettings = {};
 let subscribers = [];
 let importProductList = [];
 
+// Parse "YYYY-MM-DD" as local midnight (avoids UTC-shift bug)
+function localDate(str) {
+  const [y, m, d] = str.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
   if (!SHOP) {
@@ -1530,10 +1536,10 @@ function renderSubscribers(subs) {
   }
   tbody.innerHTML = subs.map(s => {
     const statusClass = { active: 'badge-green', paused: 'badge-yellow', cancelled: 'badge-red' }[s.status] || 'badge-blue';
-    const startFmt = s.start_date ? new Date(s.start_date).toLocaleDateString() : '—';
-    const upgradeFmt = s.last_upgrade_date ? new Date(s.last_upgrade_date).toLocaleDateString() : '—';
+    const startFmt = s.start_date ? localDate(s.start_date).toLocaleDateString() : '—';
+    const upgradeFmt = s.last_upgrade_date ? localDate(s.last_upgrade_date).toLocaleDateString() : '—';
     const monthsSince = s.last_upgrade_date
-      ? (() => { const d = new Date(s.last_upgrade_date), n = new Date(); return (n.getFullYear()-d.getFullYear())*12+(n.getMonth()-d.getMonth()); })()
+      ? (() => { const d = localDate(s.last_upgrade_date), n = new Date(); return (n.getFullYear()-d.getFullYear())*12+(n.getMonth()-d.getMonth()); })()
       : '-';
     return `<tr>
       <td><strong>${s.name}</strong><br><span style="color:var(--muted);font-size:0.78rem">${s.email||''}</span></td>
@@ -1666,8 +1672,8 @@ function renderPotmSubscribers(subs) {
   }
   tbody.innerHTML = subs.map(s => {
     const statusClass = { active: 'badge-green', paused: 'badge-yellow', cancelled: 'badge-red' }[s.status] || 'badge-blue';
-    const startFmt = s.start_date ? new Date(s.start_date).toLocaleDateString() : '—';
-    const upgradeFmt = s.last_upgrade_date ? new Date(s.last_upgrade_date).toLocaleDateString() : '—';
+    const startFmt = s.start_date ? localDate(s.start_date).toLocaleDateString() : '—';
+    const upgradeFmt = s.last_upgrade_date ? localDate(s.last_upgrade_date).toLocaleDateString() : '—';
     const months = s.months_renewed || 0;
     const remainder = months % interval;
     const monthsToNext = remainder === 0 ? (months === 0 ? interval : 0) : interval - remainder;
