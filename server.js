@@ -937,8 +937,13 @@ app.post('/api/potm/subscribers/:id/renew', verifySession, async (req, res) => {
       } : {}),
     });
 
-    log('INFO', `POTM renewal recorded for ${sub.name}`, { months: newMonths, upgraded });
-    res.json({ subscriber: updated, upgraded, months: newMonths });
+    if (!updated) {
+      log('ERROR', `POTM renewal failed — update returned null`, { id: sub.id, name: sub.name });
+      return res.status(500).json({ error: 'Database update failed — subscriber not found or not updated' });
+    }
+
+    log('INFO', `POTM renewal recorded for ${sub.name}`, { months: updated.months_renewed, upgraded });
+    res.json({ subscriber: updated, upgraded, months: updated.months_renewed });
   } catch (err) {
     console.error('POTM renew error:', err.message);
     res.status(500).json({ error: 'Failed to record renewal: ' + err.message });
