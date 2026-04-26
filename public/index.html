@@ -1740,9 +1740,10 @@ function renderPotmSubscribers(subs) {
     const currentMilestoneProcessing = latestOrderProcessing
       && Number(latestOrderProcessing.months_after || 0) === months
       && Boolean(latestOrderProcessing.upgrade_due);
-    const nextUpgradeCell = dueNow
-      ? `<span style="color:var(--accent);font-weight:700">🌟 Due now!</span>`
-      : `<span style="color:var(--muted)">${monthsToNext} mo</span>`;
+    const currentMilestoneAdded = Boolean(currentMilestoneProcessing?.upgrade_line_item_added);
+    const nextUpgradeCell = dueNow && !currentMilestoneAdded
+      ? `<span style="color:var(--accent);font-weight:700">Current</span>`
+      : `<span style="color:var(--muted)">${dueNow ? interval : monthsToNext} mo</span>`;
     const renewalCell = staleRenewal
       ? `<span style="color:var(--warning);font-weight:700">${renewalFmt}</span><br><span style="color:var(--warning);font-size:0.76rem">stale</span>`
       : renewalFmt;
@@ -1752,9 +1753,9 @@ function renderPotmSubscribers(subs) {
     } else if (dueNow && currentMilestoneProcessing?.order_edit_message) {
       upgradeOrderCell = `<span class="badge badge-red">Not added</span><br><span style="color:var(--muted);font-size:0.76rem">${escapeHtml(latestOrderProcessing.order_edit_message)}</span>`;
     } else if (dueNow) {
-      upgradeOrderCell = '<span class="badge badge-yellow">Pending</span>';
+      upgradeOrderCell = '<span class="badge badge-yellow">Needs add</span>';
     }
-    const upgradeAction = dueNow && !currentMilestoneProcessing?.upgrade_line_item_added
+    const upgradeAction = dueNow && !currentMilestoneAdded
       ? `<button class="btn btn-sm" style="background:#f39c12;color:#111" onclick="addPotmUpgradeToLatestOrder(${s.id}, '${s.name.replace(/'/g,"\\'")}')">Add Upgrade</button>`
       : '';
     return `<tr>
