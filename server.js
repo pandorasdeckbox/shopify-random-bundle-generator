@@ -45,6 +45,7 @@ import {
   deletePotmSubscriber,
   getPotmOrderProcessing,
   savePotmOrderProcessing,
+  getLatestPotmOrderProcessingBySubscriber,
 } from './database.js';
 
 import {
@@ -471,6 +472,34 @@ async function buildPotmOrderSummary(session, configuredProductId) {
   }
 
   return orderMap;
+}
+
+async function findLatestPotmPaidOrderForCustomer(session, configuredProductId, shopifyCustomerId) {
+  const client = new shopify.clients.Rest({ session });
+  const response = await client.get({
+    path: 'orders',
+    query: {
+      limit: 250,
+      status: 'any',
+      customer_id: shopifyCustomerId,
+      fields: 'id,name,currency,created_at,processed_at,cancelled_at,financial_status,line_items',
+    },
+  });
+
+  const orders = response.body.orders || [];
+  const matchingOrders = orders.filter(order => {
+    if (order.cancelled_at) return false;
+    if (order.financial_status && order.financial_status !== 'paid') return false;
+    return (order.line_items || []).some(item => matchesConfiguredProduct(item.product_id, configuredProductId));
+  });
+
+  matchingOrders.sort((a, b) => {
+    const aDate = new Date(a.processed_at || a.created_at || 0).getTime();
+    const bDate = new Date(b.processed_at || b.created_at || 0).getTime();
+    return bDate - aDate;
+  });
+
+  return matchingOrders[0] || null;
 }
 
 // ─── API: Shop Info ───────────────────────────────────────────────────────────
@@ -1003,8 +1032,22 @@ app.post('/api/subscribers/import', verifySession, async (req, res) => {
 
 app.get('/api/potm/subscribers', verifySession, async (req, res) => {
   try {
-    const subs = await getPotmSubscribers(req.shopifySession.shop);
-    res.json({ subscribers: subs });
+    const shop = req.shopifySession.shop;
+    const [subs, latestProcessingRows] = await Promise.all([
+      getPotmSubscribers(shop),
+      getLatestPotmOrderProcessingBySubscriber(shop),
+    ]);
+
+    const latestProcessingBySubscriberId = new Map(
+      latestProcessingRows.map(row => [row.potm_subscriber_id, row])
+    );
+
+    const enrichedSubscribers = subs.map(sub => ({
+      ...sub,
+      latest_order_processing: latestProcessingBySubscriberId.get(sub.id) || null,
+    }));
+
+    res.json({ subscribers: enrichedSubscribers });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch POTM subscribers' });
   }
@@ -1147,6 +1190,103 @@ app.post('/api/potm/subscribers/:id/renew', verifySession, async (req, res) => {
   } catch (err) {
     console.error('POTM renew error:', err.message);
     res.status(500).json({ error: 'Failed to record renewal: ' + err.message });
+  }
+});
+
+app.post('/api/potm/subscribers/:id/add-upgrade-to-latest-order', verifySession, async (req, res) => {
+  try {
+    const shop = req.shopifySession.shop;
+    const settings = await getSettings(shop);
+    const interval = settings.potm_upgrade_interval_months || 6;
+
+    if (!settings.potm_product_id) {
+      return res.status(400).json({ error: 'Set the Pack of the Month product ID in Settings first.' });
+    }
+
+    const subscriber = await getPotmSubscriber(shop, req.params.id);
+    if (!subscriber) return res.status(404).json({ error: 'Subscriber not found' });
+    if (!subscriber.shopify_customer_id) {
+      return res.status(400).json({ error: 'Subscriber is missing a Shopify customer ID.' });
+    }
+
+    const months = subscriber.months_renewed || 0;
+    const upgradeDue = months > 0 && months % interval === 0;
+    if (!upgradeDue) {
+      return res.status(400).json({ error: 'Subscriber is not currently due for a collector upgrade.' });
+    }
+
+    const session = await sessionStorage.loadSession(`offline_${shop}`);
+    if (!session) {
+      return res.status(401).json({ error: 'No Shopify session found. Reauthorize the app and try again.' });
+    }
+
+    const order = await findLatestPotmPaidOrderForCustomer(session, settings.potm_product_id, subscriber.shopify_customer_id);
+    if (!order) {
+      return res.status(404).json({ error: 'No paid Pack of the Month Shopify order was found for this subscriber.' });
+    }
+
+    const shopifyOrderId = String(order.id);
+    let processing = await getPotmOrderProcessing(shop, shopifyOrderId) || null;
+    const saveProcessing = async (updates = {}) => {
+      processing = await savePotmOrderProcessing(shop, shopifyOrderId, {
+        shopify_order_name: order.name || processing?.shopify_order_name || null,
+        potm_subscriber_id: updates.potm_subscriber_id ?? processing?.potm_subscriber_id ?? subscriber.id,
+        renewal_processed: updates.renewal_processed ?? processing?.renewal_processed ?? false,
+        renewal_date: updates.renewal_date ?? processing?.renewal_date ?? null,
+        months_after: updates.months_after ?? processing?.months_after ?? months,
+        upgrade_due: updates.upgrade_due ?? processing?.upgrade_due ?? upgradeDue,
+        discord_alert_sent: updates.discord_alert_sent ?? processing?.discord_alert_sent ?? false,
+        upgrade_line_item_added: updates.upgrade_line_item_added ?? processing?.upgrade_line_item_added ?? false,
+        order_edit_message: updates.order_edit_message ?? processing?.order_edit_message ?? null,
+      });
+      return processing;
+    };
+
+    if (Boolean(processing?.upgrade_line_item_added)) {
+      return res.json({
+        success: true,
+        orderName: order.name,
+        alreadyAdded: true,
+        message: processing.order_edit_message || `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} was already added to the latest Shopify order.`,
+      });
+    }
+
+    if ((order.line_items || []).some(item => item.title === POTM_UPGRADE_CUSTOM_ITEM_TITLE)) {
+      await saveProcessing({
+        upgrade_line_item_added: true,
+        order_edit_message: `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} already present on order payload.`,
+      });
+      return res.json({
+        success: true,
+        orderName: order.name,
+        alreadyAdded: true,
+        message: `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} was already present on ${order.name}.`,
+      });
+    }
+
+    const commitResult = await autoAddPotmUpgradeCustomItem({
+      session,
+      order,
+      subscriberName: subscriber.name,
+    });
+
+    const message = commitResult.successMessages?.join('; ') || `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} added automatically.`;
+    await saveProcessing({
+      upgrade_line_item_added: true,
+      order_edit_message: message,
+      months_after: months,
+      upgrade_due: upgradeDue,
+    });
+
+    res.json({
+      success: true,
+      orderName: order.name,
+      alreadyAdded: false,
+      message,
+    });
+  } catch (err) {
+    console.error('POTM manual upgrade order edit error:', err.message);
+    res.status(500).json({ error: 'Failed to add collector upgrade to latest Shopify order: ' + err.message });
   }
 });
 

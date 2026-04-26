@@ -700,6 +700,7 @@ Collector packs are sorted to the top of the list automatically.</pre>
               <th>Months</th>
               <th>Last Renewal</th>
               <th>Next Upgrade</th>
+              <th>Upgrade Order</th>
               <th>Upgrades</th>
               <th>Last Upgrade</th>
               <th>Status</th>
@@ -1002,6 +1003,15 @@ let importProductList = [];
 function localDate(str) {
   const [y, m, d] = str.slice(0, 10).split('-').map(Number);
   return new Date(y, m - 1, d);
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -1689,7 +1699,7 @@ function renderPotmSubscribers(subs) {
   const interval = parseInt(document.getElementById('s-potm-interval')?.value) || (currentSettings?.potm_upgrade_interval_months) || 6;
   const tbody = document.getElementById('potm-tbody');
   if (!subs.length) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:32px;">No POTM subscribers yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:32px;">No POTM subscribers yet</td></tr>';
     return;
   }
   tbody.innerHTML = subs.map(s => {
@@ -1703,23 +1713,40 @@ function renderPotmSubscribers(subs) {
     const dueNow = months > 0 && remainder === 0;
     const renewalAgeDays = s.last_renewal_date ? Math.floor((Date.now() - localDate(s.last_renewal_date).getTime()) / 86400000) : null;
     const staleRenewal = renewalAgeDays !== null && renewalAgeDays > 35;
+    const latestOrderProcessing = s.latest_order_processing;
+    const currentMilestoneProcessing = latestOrderProcessing
+      && Number(latestOrderProcessing.months_after || 0) === months
+      && Boolean(latestOrderProcessing.upgrade_due);
     const nextUpgradeCell = dueNow
       ? `<span style="color:var(--accent);font-weight:700">🌟 Due now!</span>`
       : `<span style="color:var(--muted)">${monthsToNext} mo</span>`;
     const renewalCell = staleRenewal
       ? `<span style="color:var(--warning);font-weight:700">${renewalFmt}</span><br><span style="color:var(--warning);font-size:0.76rem">stale</span>`
       : renewalFmt;
+    let upgradeOrderCell = '<span style="color:var(--muted)">—</span>';
+    if (dueNow && currentMilestoneProcessing?.upgrade_line_item_added) {
+      upgradeOrderCell = `<span class="badge badge-green">Added</span>${latestOrderProcessing.shopify_order_name ? `<br><span style="color:var(--muted);font-size:0.76rem">${escapeHtml(latestOrderProcessing.shopify_order_name)}</span>` : ''}`;
+    } else if (dueNow && currentMilestoneProcessing?.order_edit_message) {
+      upgradeOrderCell = `<span class="badge badge-red">Not added</span><br><span style="color:var(--muted);font-size:0.76rem">${escapeHtml(latestOrderProcessing.order_edit_message)}</span>`;
+    } else if (dueNow) {
+      upgradeOrderCell = '<span class="badge badge-yellow">Pending</span>';
+    }
+    const upgradeAction = dueNow && !currentMilestoneProcessing?.upgrade_line_item_added
+      ? `<button class="btn btn-sm" style="background:#f39c12;color:#111" onclick="addPotmUpgradeToLatestOrder(${s.id}, '${s.name.replace(/'/g,"\\'")}')">Add Upgrade</button>`
+      : '';
     return `<tr>
       <td><strong>${s.name}</strong><br><span style="color:var(--muted);font-size:0.78rem">${s.email||''}</span></td>
       <td>${startFmt}</td>
       <td>${months}</td>
       <td style="font-size:0.85rem">${renewalCell}</td>
       <td>${nextUpgradeCell}</td>
+      <td style="font-size:0.85rem">${upgradeOrderCell}</td>
       <td>${s.collector_upgrade_count || 0}</td>
       <td style="font-size:0.85rem">${upgradeFmt}</td>
       <td><span class="badge ${statusClass}">${s.status}</span></td>
       <td><div class="action-btns">
         <button class="btn btn-secondary btn-sm" onclick="openPotmModal(${s.id})">Edit</button>
+        ${upgradeAction}
         <button class="btn btn-sm" style="background:#2a7a3b;color:#fff" onclick="recordPotmRenewal(${s.id}, '${s.name.replace(/'/g,"\\'")}')">+1 Month</button>
         <button class="btn btn-danger btn-sm" onclick="deletePotmSubscriber(${s.id}, '${s.name.replace(/'/g,"\\'")}')">Del</button>
       </div></td>
@@ -1823,6 +1850,19 @@ async function recordPotmRenewal(id, name) {
   } catch(e) {
     alert('Failed to record renewal: ' + e.message);
     await loadPotmSubscribers();
+  }
+}
+
+async function addPotmUpgradeToLatestOrder(id, name) {
+  if (!confirm(`Add a free ${'COLLECTOR UPGRADE'} item to ${name}'s latest paid Pack of the Month Shopify order?`)) return;
+
+  try {
+    const result = await api(`/api/potm/subscribers/${id}/add-upgrade-to-latest-order`, { method: 'POST', body: {} });
+    const statusLine = result.alreadyAdded ? 'No new edit was needed.' : 'Shopify order updated.';
+    alert(`✅ ${statusLine}\n\nSubscriber: ${name}\nOrder: ${result.orderName}\n${result.message}`);
+    await loadPotmSubscribers();
+  } catch (e) {
+    alert('Failed to add collector upgrade to latest Shopify order: ' + e.message);
   }
 }
 
