@@ -528,7 +528,10 @@
         <small style="color:var(--muted); margin-top:4px; display:block;">Optional text added to the top of the Discord alert.</small>
       </div>
       <div id="webhook-alert"></div>
-      <button class="btn btn-secondary" onclick="registerWebhook()">🔗 Register orders/paid Webhook</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-secondary" type="button" onclick="testPotmDiscordWebhook()">Test Discord Webhook</button>
+        <button class="btn btn-secondary" type="button" onclick="registerWebhook()">🔗 Register orders/paid Webhook</button>
+      </div>
     </div>
 
     <div class="card">
@@ -1498,6 +1501,26 @@ async function registerWebhook() {
     showAlert('webhook-alert', '✅ ' + result.message, 'success');
   } catch(e) {
     showAlert('webhook-alert', 'Webhook registration failed: ' + e.message);
+  }
+}
+
+async function testPotmDiscordWebhook() {
+  const webhookUrl = document.getElementById('s-potm-discord-webhook').value.trim();
+  const mentions = document.getElementById('s-potm-discord-mentions').value.trim();
+
+  if (!webhookUrl) {
+    showAlert('webhook-alert', 'Enter a POTM Discord webhook URL first.');
+    return;
+  }
+
+  try {
+    const result = await api('/api/potm/test-discord-webhook', {
+      method: 'POST',
+      body: { webhookUrl, mentions },
+    });
+    showAlert('webhook-alert', '✅ ' + result.message, 'success');
+  } catch(e) {
+    showAlert('webhook-alert', 'Discord webhook test failed: ' + e.message);
   }
 }
 

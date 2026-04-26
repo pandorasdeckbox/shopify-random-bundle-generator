@@ -562,6 +562,34 @@ app.post('/api/settings', verifySession, async (req, res) => {
   }
 });
 
+app.post('/api/potm/test-discord-webhook', verifySession, async (req, res) => {
+  try {
+    const webhookUrl = req.body.webhookUrl?.trim();
+    const mentions = req.body.mentions?.trim();
+
+    if (!webhookUrl) {
+      return res.status(400).json({ error: 'Enter a POTM Discord webhook URL first.' });
+    }
+
+    const content = [
+      mentions || null,
+      'POTM Discord webhook test from Bundle Generator.',
+      `Shop: ${req.shopifySession.shop}`,
+      `Sent: ${new Date().toISOString()}`,
+    ].filter(Boolean).join('\n');
+
+    await sendDiscordWebhook(webhookUrl, {
+      username: 'Bundle Generator',
+      content,
+    });
+
+    res.json({ success: true, message: 'Test message sent to Discord.' });
+  } catch (err) {
+    console.error('Error testing POTM Discord webhook:', err.message);
+    res.status(500).json({ error: err.message || 'Failed to send test Discord webhook' });
+  }
+});
+
 // ─── API: Generate Bundle ─────────────────────────────────────────────────────
 
 app.post('/api/generate', verifySession, async (req, res) => {
