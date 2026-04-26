@@ -265,10 +265,30 @@ function latestDate(a, b) {
   return a >= b ? a : b;
 }
 
-function matchesConfiguredProduct(productId, configuredGid) {
-  if (!configuredGid) return false;
+function normalizeConfiguredProductIds(configuredValue) {
+  if (Array.isArray(configuredValue)) {
+    return configuredValue.map(value => String(value || '').trim()).filter(Boolean);
+  }
+
+  return String(configuredValue || '')
+    .split(/\r?\n|,/)
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
+function firstConfiguredProductId(configuredValue) {
+  return normalizeConfiguredProductIds(configuredValue)[0] || '';
+}
+
+function hasConfiguredProducts(configuredValue) {
+  return normalizeConfiguredProductIds(configuredValue).length > 0;
+}
+
+function matchesConfiguredProduct(productId, configuredValue) {
+  const configuredIds = normalizeConfiguredProductIds(configuredValue);
+  if (!configuredIds.length) return false;
   const gid = `gid://shopify/Product/${productId}`;
-  return gid === configuredGid || String(productId) === String(configuredGid).split('/').pop();
+  return configuredIds.some(configuredId => gid === configuredId || String(productId) === String(configuredId).split('/').pop());
 }
 
 function getExpectedPotmUpgrade(orderDates, interval) {
@@ -763,7 +783,7 @@ app.get('/api/chaos/pending-orders', verifySession, async (req, res) => {
     const shop = req.shopifySession.shop;
     const settings = await getSettings(shop);
 
-    if (!settings.chaos_club_product_id) {
+    if (!hasConfiguredProducts(settings.chaos_club_product_id)) {
       return res.json({ orders: [] });
     }
 
@@ -781,7 +801,7 @@ app.post('/api/chaos/pending-orders/process-next', verifySession, async (req, re
     const shop = req.shopifySession.shop;
     const settings = await getSettings(shop);
 
-    if (!settings.chaos_club_product_id) {
+    if (!hasConfiguredProducts(settings.chaos_club_product_id)) {
       return res.status(400).json({ error: 'Set the Chaos Club product ID in Settings first.' });
     }
 
@@ -1161,13 +1181,10 @@ app.get('/api/subscribers/import-preview', verifySession, async (req, res) => {
     const shop = req.shopifySession.shop;
     const settings = await getSettings(shop);
     // Accept product_gid as a query param override (allows picking in modal without Settings pre-config)
-    const chaosProductId = req.query.product_gid || settings.chaos_club_product_id;
-    if (!chaosProductId) {
+    const configuredChaosProducts = req.query.product_gid || settings.chaos_club_product_id;
+    if (!hasConfiguredProducts(configuredChaosProducts)) {
       return res.status(400).json({ error: 'No product selected.' });
     }
-
-    // Extract numeric ID from GID
-    const numericId = String(chaosProductId).split('/').pop();
 
     // Paginate through ALL orders using since_id (ascending by ID) — more reliable than Link headers
     const client = new shopify.clients.Rest({ session: req.shopifySession });
@@ -1190,7 +1207,7 @@ app.get('/api/subscribers/import-preview', verifySession, async (req, res) => {
 
       for (const order of orders) {
         if (!order.customer) continue;
-        const lineItem = (order.line_items || []).find(li => String(li.product_id) === numericId);
+        const lineItem = (order.line_items || []).find(li => matchesConfiguredProduct(li.product_id, configuredChaosProducts));
         if (!lineItem) continue;
 
         const custId = String(order.customer.id);
@@ -1354,10 +1371,10 @@ app.get('/api/potm/subscribers/import-preview', verifySession, async (req, res) 
   try {
     const shop = req.shopifySession.shop;
     const settings = await getSettings(shop);
-    const potmProductId = req.query.product_gid || settings.potm_product_id;
-    if (!potmProductId) return res.status(400).json({ error: 'No POTM product selected.' });
+    const configuredPotmProducts = req.query.product_gid || settings.potm_product_id;
+    if (!hasConfiguredProducts(configuredPotmProducts)) return res.status(400).json({ error: 'No POTM product selected.' });
 
-    const orderMap = await buildPotmOrderSummary(req.shopifySession, potmProductId);
+    const orderMap = await buildPotmOrderSummary(req.shopifySession, configuredPotmProducts);
 
     const existingSubs = await getPotmSubscribers(shop);
     const existingIds = new Set(existingSubs.map(s => String(s.shopify_customer_id)).filter(Boolean));
@@ -1464,7 +1481,7 @@ app.post('/api/potm/subscribers/:id/add-upgrade-to-latest-order', verifySession,
     const settings = await getSettings(shop);
     const interval = settings.potm_upgrade_interval_months || 6;
 
-    if (!settings.potm_product_id) {
+    if (!hasConfiguredProducts(settings.potm_product_id)) {
       return res.status(400).json({ error: 'Set the Pack of the Month product ID in Settings first.' });
     }
 
@@ -1564,7 +1581,7 @@ app.post('/api/potm/subscribers/reconcile', verifySession, async (req, res) => {
     const settings = await getSettings(shop);
     const interval = settings.potm_upgrade_interval_months || 6;
 
-    if (!settings.potm_product_id) {
+    if (!hasConfiguredProducts(settings.potm_product_id)) {
       return res.status(400).json({ error: 'Set the Pack of the Month product ID in Settings first.' });
     }
 

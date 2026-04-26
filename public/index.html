@@ -534,18 +534,18 @@
     <div class="card">
       <h2>Subscription Webhook</h2>
       <p style="color:var(--muted); font-size:0.85rem; margin-bottom:14px;">
-        Set the Shopify Product ID for your Chaos Club subscription product. When a renewal order is paid, 
+        Set the Shopify product IDs for your Chaos Club and Pack of the Month subscription listings. When a renewal order is paid, 
         a bundle will auto-generate and inventory will be decremented.
       </p>
       <div class="form-group" style="margin-bottom:16px;">
-        <label>Chaos Club Shopify Product ID</label>
-        <input type="text" id="s-chaos-product" placeholder="7528931229761">
-        <small style="color:var(--muted); margin-top:4px; display:block;">Paste the numeric ID from the admin URL: /products/<strong>7528931229761</strong> — the full gid:// format also works.</small>
+        <label>Chaos Club Shopify Product IDs</label>
+        <textarea id="s-chaos-product" rows="3" placeholder="7528931229761&#10;7528931229999"></textarea>
+        <small style="color:var(--muted); margin-top:4px; display:block;">Enter one product ID per line or separate with commas. Numeric IDs from the admin URL and full gid:// values both work.</small>
       </div>
       <div class="form-group" style="margin-bottom:16px;">
-        <label>Pack of the Month Shopify Product ID</label>
-        <input type="text" id="s-potm-product" placeholder="7528931229761">
-        <small style="color:var(--muted); margin-top:4px; display:block;">Paste the numeric ID from the admin URL: /products/<strong>7528931229761</strong> — the full gid:// format also works. When a renewal order is paid, the subscriber's month count is incremented automatically.</small>
+        <label>Pack of the Month Shopify Product IDs</label>
+        <textarea id="s-potm-product" rows="3" placeholder="7528931229761&#10;7528931229999"></textarea>
+        <small style="color:var(--muted); margin-top:4px; display:block;">Enter one product ID per line or separate with commas. When a renewal order is paid for any configured listing, the subscriber's month count is incremented automatically.</small>
       </div>
       <div class="form-group" style="margin-bottom:16px;">
         <label>POTM Collector Upgrade Interval (months)</label>
@@ -1053,6 +1053,25 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+function normalizeConfiguredProductIds(value) {
+  if (Array.isArray(value)) {
+    return value.map(item => String(item || '').trim()).filter(Boolean);
+  }
+
+  return String(value || '')
+    .split(/\r?\n|,/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function firstConfiguredProductId(value) {
+  return normalizeConfiguredProductIds(value)[0] || '';
+}
+
+function formatConfiguredProductIds(value) {
+  return normalizeConfiguredProductIds(value).join('\n');
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
   if (!SHOP) {
@@ -1143,7 +1162,7 @@ function renderPendingChaosOrders(orders) {
     summary.style.display = 'none';
     tableWrap.style.display = 'none';
     empty.style.display = 'block';
-    empty.textContent = currentSettings?.chaos_club_product_id
+    empty.textContent = normalizeConfiguredProductIds(currentSettings?.chaos_club_product_id).length
       ? 'No pending paid Chaos Club orders right now.'
       : 'Set the Chaos Club product ID in Settings to load the queue.';
     processBtn.disabled = true;
@@ -1556,8 +1575,8 @@ async function loadSettings() {
     document.getElementById('s-advent-ideal').value = s.advent_ideal_margin_percent || 25;
     document.getElementById('s-max-collector').value = s.collector_upgrade_max_price || 50;
     document.getElementById('s-luck-months').value = s.luck_protection_months || 12;
-    document.getElementById('s-chaos-product').value = s.chaos_club_product_id || '';
-    document.getElementById('s-potm-product').value = s.potm_product_id || '';
+    document.getElementById('s-chaos-product').value = formatConfiguredProductIds(s.chaos_club_product_id);
+    document.getElementById('s-potm-product').value = formatConfiguredProductIds(s.potm_product_id);
     document.getElementById('s-potm-interval').value = s.potm_upgrade_interval_months || 6;
     document.getElementById('s-potm-discord-webhook').value = s.potm_discord_webhook_url || '';
     document.getElementById('s-potm-discord-mentions').value = s.potm_discord_webhook_mentions || '';
@@ -2064,7 +2083,7 @@ async function openPotmImportModal() {
   if (!allProducts.length) await loadProducts();
 
   // Pre-select if already set in settings
-  const savedGid = currentSettings?.potm_product_id;
+  const savedGid = firstConfiguredProductId(currentSettings?.potm_product_id);
   if (savedGid) {
     const match = allProducts.find(p => p.id === savedGid);
     if (match) selectPotmImportProduct(match.id, match.title);
@@ -2288,7 +2307,7 @@ async function openImportModal() {
   importProductList = allProducts.length ? allProducts : (await api('/api/products').then(d => d.products).catch(() => []));
 
   // Pre-select if already set in settings
-  const savedGid = currentSettings.chaos_club_product_id;
+  const savedGid = firstConfiguredProductId(currentSettings.chaos_club_product_id);
   if (savedGid) {
     const match = importProductList.find(p => p.id === savedGid);
     if (match) selectImportProduct(match.id, match.title);
