@@ -1274,6 +1274,7 @@ app.post('/api/potm/subscribers/:id/add-upgrade-to-latest-order', verifySession,
         success: true,
         orderName: order.name,
         alreadyAdded: true,
+        processing,
         message: processing.order_edit_message || `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} was already added to the latest Shopify order.`,
       });
     }
@@ -1287,6 +1288,7 @@ app.post('/api/potm/subscribers/:id/add-upgrade-to-latest-order', verifySession,
         success: true,
         orderName: order.name,
         alreadyAdded: true,
+        processing,
         message: `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} was already present on ${order.name}.`,
       });
     }
@@ -1309,6 +1311,7 @@ app.post('/api/potm/subscribers/:id/add-upgrade-to-latest-order', verifySession,
       success: true,
       orderName: order.name,
       alreadyAdded: false,
+      processing,
       message,
     });
   } catch (err) {

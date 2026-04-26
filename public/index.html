@@ -1882,9 +1882,14 @@ async function addPotmUpgradeToLatestOrder(id, name) {
 
   try {
     const result = await api(`/api/potm/subscribers/${id}/add-upgrade-to-latest-order`, { method: 'POST', body: {} });
+    const subscriber = potmSubscribers.find(s => s.id === id);
+    if (subscriber && result.processing) {
+      subscriber.latest_order_processing = result.processing;
+      renderPotmSubscribers(potmSubscribers);
+    }
     const statusLine = result.alreadyAdded ? 'No new edit was needed.' : 'Shopify order updated.';
     alert(`✅ ${statusLine}\n\nSubscriber: ${name}\nOrder: ${result.orderName}\n${result.message}`);
-    await loadPotmSubscribers();
+    loadPotmSubscribers();
   } catch (e) {
     alert('Failed to add collector upgrade to latest Shopify order: ' + e.message);
   }
