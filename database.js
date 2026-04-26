@@ -30,6 +30,17 @@ export async function initDatabase() {
   }
 }
 
+async function ensurePostgresColumn(tableName, columnName, definition) {
+  await pgPool.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS ${columnName} ${definition}`);
+}
+
+function ensureSQLiteColumn(tableName, columnName, definition) {
+  const columns = sqliteDb.prepare(`PRAGMA table_info(${tableName})`).all();
+  if (!columns.some(column => column.name === columnName)) {
+    sqliteDb.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`).run();
+  }
+}
+
 // ─── Table Setup ────────────────────────────────────────────────────────────
 
 async function setupPostgresTables() {
@@ -114,6 +125,7 @@ async function setupPostgresTables() {
       start_date DATE,
       months_renewed INTEGER DEFAULT 0,
       collector_upgrade_count INTEGER DEFAULT 0,
+      last_renewal_date DATE,
       last_upgrade_date DATE,
       renewal_day INTEGER,
       notes TEXT,
@@ -122,6 +134,27 @@ async function setupPostgresTables() {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS potm_order_processing (
+      shop TEXT NOT NULL,
+      shopify_order_id TEXT NOT NULL,
+      shopify_order_name TEXT,
+      potm_subscriber_id INTEGER REFERENCES potm_subscribers(id) ON DELETE SET NULL,
+      renewal_processed BOOLEAN DEFAULT FALSE,
+      renewal_date DATE,
+      months_after INTEGER,
+      upgrade_due BOOLEAN DEFAULT FALSE,
+      discord_alert_sent BOOLEAN DEFAULT FALSE,
+      upgrade_line_item_added BOOLEAN DEFAULT FALSE,
+      order_edit_message TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      PRIMARY KEY (shop, shopify_order_id)
+    )
+  `);
+
+  await ensurePostgresColumn('potm_subscribers', 'last_renewal_date', 'DATE');
 }
 
 function setupSQLiteTables() {
@@ -185,6 +218,7 @@ function setupSQLiteTables() {
       start_date TEXT,
       months_renewed INTEGER DEFAULT 0,
       collector_upgrade_count INTEGER DEFAULT 0,
+      last_renewal_date TEXT,
       last_upgrade_date TEXT,
       renewal_day INTEGER,
       notes TEXT,
@@ -192,7 +226,26 @@ function setupSQLiteTables() {
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS potm_order_processing (
+      shop TEXT NOT NULL,
+      shopify_order_id TEXT NOT NULL,
+      shopify_order_name TEXT,
+      potm_subscriber_id INTEGER,
+      renewal_processed INTEGER DEFAULT 0,
+      renewal_date TEXT,
+      months_after INTEGER,
+      upgrade_due INTEGER DEFAULT 0,
+      discord_alert_sent INTEGER DEFAULT 0,
+      upgrade_line_item_added INTEGER DEFAULT 0,
+      order_edit_message TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (shop, shopify_order_id)
+    );
   `);
+
+  ensureSQLiteColumn('potm_subscribers', 'last_renewal_date', 'TEXT');
 }
 
 // ─── PostgreSQL Session Storage ──────────────────────────────────────────────
@@ -240,6 +293,8 @@ export function getDefaultSettings() {
     chaos_club_product_id: '',
     potm_product_id: '',
     potm_upgrade_interval_months: 6,
+    potm_discord_webhook_url: '',
+    potm_discord_webhook_mentions: '',
     subscription_pricing: { 3: 26, 6: 43, 9: 59, 12: 74 },
     shipping_cost: 8,
     min_margin_percent: 10,
@@ -499,8 +554,8 @@ export async function getPotmSubscriberByCustomerId(shop, shopifyCustomerId) {
 }
 
 export async function createPotmSubscriber(shop, data) {
-  const fields = ['shopify_customer_id', 'name', 'email', 'start_date', 'months_renewed', 'collector_upgrade_count', 'last_upgrade_date', 'renewal_day', 'notes', 'status'];
-  const values = [data.shopify_customer_id || null, data.name, data.email || null, data.start_date || null, data.months_renewed || 0, data.collector_upgrade_count || 0, data.last_upgrade_date || null, data.renewal_day || null, data.notes || null, data.status || 'active'];
+  const fields = ['shopify_customer_id', 'name', 'email', 'start_date', 'months_renewed', 'collector_upgrade_count', 'last_renewal_date', 'last_upgrade_date', 'renewal_day', 'notes', 'status'];
+  const values = [data.shopify_customer_id || null, data.name, data.email || null, data.start_date || null, data.months_renewed || 0, data.collector_upgrade_count || 0, data.last_renewal_date || null, data.last_upgrade_date || null, data.renewal_day || null, data.notes || null, data.status || 'active'];
 
   if (pgPool) {
     const placeholders = fields.map((_, i) => `$${i + 2}`).join(', ');
@@ -519,7 +574,7 @@ export async function createPotmSubscriber(shop, data) {
 }
 
 export async function updatePotmSubscriber(shop, id, data) {
-  const fields = ['name', 'email', 'start_date', 'months_renewed', 'collector_upgrade_count', 'last_upgrade_date', 'renewal_day', 'notes', 'status', 'shopify_customer_id'];
+  const fields = ['name', 'email', 'start_date', 'months_renewed', 'collector_upgrade_count', 'last_renewal_date', 'last_upgrade_date', 'renewal_day', 'notes', 'status', 'shopify_customer_id'];
   const values = fields.map(f => (data[f] !== undefined ? data[f] : null));
 
   if (pgPool) {
@@ -543,5 +598,56 @@ export async function deletePotmSubscriber(shop, id) {
     await pgPool.query('DELETE FROM potm_subscribers WHERE shop = $1 AND id = $2', [shop, id]);
   } else {
     sqliteDb.prepare('DELETE FROM potm_subscribers WHERE shop = ? AND id = ?').run(shop, id);
+  }
+}
+
+export async function getPotmOrderProcessing(shop, shopifyOrderId) {
+  if (pgPool) {
+    const result = await pgPool.query(
+      'SELECT * FROM potm_order_processing WHERE shop = $1 AND shopify_order_id = $2',
+      [shop, shopifyOrderId]
+    );
+    return result.rows[0] || null;
+  } else {
+    return sqliteDb.prepare(
+      'SELECT * FROM potm_order_processing WHERE shop = ? AND shopify_order_id = ?'
+    ).get(shop, shopifyOrderId) || null;
+  }
+}
+
+export async function savePotmOrderProcessing(shop, shopifyOrderId, data) {
+  const fields = [
+    'shopify_order_name',
+    'potm_subscriber_id',
+    'renewal_processed',
+    'renewal_date',
+    'months_after',
+    'upgrade_due',
+    'discord_alert_sent',
+    'upgrade_line_item_added',
+    'order_edit_message',
+  ];
+  const values = fields.map(field => (data[field] !== undefined ? data[field] : null));
+
+  if (pgPool) {
+    const updateAssignments = fields.map((field, index) => `${field} = $${index + 3}`).join(', ');
+    const result = await pgPool.query(
+      `INSERT INTO potm_order_processing (shop, shopify_order_id, ${fields.join(', ')}, created_at, updated_at)
+       VALUES ($1, $2, ${fields.map((_, index) => `$${index + 3}`).join(', ')}, NOW(), NOW())
+       ON CONFLICT (shop, shopify_order_id) DO UPDATE SET ${updateAssignments}, updated_at = NOW()
+       RETURNING *`,
+      [shop, shopifyOrderId, ...values]
+    );
+    return result.rows[0] || null;
+  } else {
+    sqliteDb.prepare(
+      `INSERT INTO potm_order_processing (shop, shopify_order_id, ${fields.join(', ')}, created_at, updated_at)
+       VALUES (?, ?, ${fields.map(() => '?').join(', ')}, datetime('now'), datetime('now'))
+       ON CONFLICT(shop, shopify_order_id) DO UPDATE SET
+         ${fields.map(field => `${field} = excluded.${field}`).join(', ')},
+         updated_at = datetime('now')`
+    ).run(shop, shopifyOrderId, ...values.map(value => (typeof value === 'boolean' ? (value ? 1 : 0) : value)));
+
+    return getPotmOrderProcessing(shop, shopifyOrderId);
   }
 }

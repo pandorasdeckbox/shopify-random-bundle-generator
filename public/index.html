@@ -517,6 +517,16 @@
         <input type="number" id="s-potm-interval" value="6" min="1" max="120" style="max-width:120px;">
         <small style="color:var(--muted); margin-top:4px; display:block;">Every N months, subscriber gets a Collector Booster upgrade flag.</small>
       </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>POTM Discord Webhook URL</label>
+        <input type="text" id="s-potm-discord-webhook" placeholder="https://discord.com/api/webhooks/...">
+        <small style="color:var(--muted); margin-top:4px; display:block;">Optional. When a paid POTM renewal hits the collector interval, the app will post a staff notification here automatically.</small>
+      </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label>POTM Discord Mentions</label>
+        <input type="text" id="s-potm-discord-mentions" placeholder="@pack-team or &lt;@&amp;role_id&gt;">
+        <small style="color:var(--muted); margin-top:4px; display:block;">Optional text added to the top of the Discord alert.</small>
+      </div>
       <div id="webhook-alert"></div>
       <button class="btn btn-secondary" onclick="registerWebhook()">🔗 Register orders/paid Webhook</button>
     </div>
@@ -672,12 +682,13 @@ Collector packs are sorted to the top of the list automatically.</pre>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <h2 style="margin:0">🎴 Pack of the Month Subscribers</h2>
         <div style="display:flex;gap:8px;">
+          <button id="potm-reconcile-btn" class="btn btn-secondary btn-sm" onclick="reconcilePotmSubscribers()">↺ Catch Up from Orders</button>
           <button class="btn btn-secondary btn-sm" onclick="openPotmImportModal()">⬇ Import from Orders</button>
           <button class="btn btn-primary btn-sm" onclick="openPotmModal()">+ Add Subscriber</button>
         </div>
       </div>
       <p style="color:var(--muted);font-size:0.82rem;margin-bottom:14px;margin-top:-8px;">
-        Tracks monthly pack subscribers. Every <span id="potm-interval-display">6</span> months, a 🌟 collector upgrade is flagged automatically when a renewal order is paid.
+        Tracks monthly pack subscribers. Every <span id="potm-interval-display">6</span> months, a 🌟 collector upgrade is flagged automatically when a renewal order is paid. Use Catch Up from Orders to reconcile any missed month increments from Shopify history.
       </p>
       <div id="potm-loading" class="loading" style="display:none"><div class="spinner"></div></div>
       <div class="table-wrap">
@@ -687,6 +698,7 @@ Collector packs are sorted to the top of the list automatically.</pre>
               <th>Name</th>
               <th>Start Date</th>
               <th>Months</th>
+              <th>Last Renewal</th>
               <th>Next Upgrade</th>
               <th>Upgrades</th>
               <th>Last Upgrade</th>
@@ -901,6 +913,10 @@ Collector packs are sorted to the top of the list automatically.</pre>
       <div class="form-group">
         <label>Collector Upgrades</label>
         <input type="number" id="pm-upgrades" value="0" min="0">
+      </div>
+      <div class="form-group">
+        <label>Last Renewal Date</label>
+        <input type="date" id="pm-last-renewal">
       </div>
       <div class="form-group">
         <label>Last Upgrade Date</label>
@@ -1410,6 +1426,8 @@ async function loadSettings() {
     document.getElementById('s-chaos-product').value = s.chaos_club_product_id || '';
     document.getElementById('s-potm-product').value = s.potm_product_id || '';
     document.getElementById('s-potm-interval').value = s.potm_upgrade_interval_months || 6;
+    document.getElementById('s-potm-discord-webhook').value = s.potm_discord_webhook_url || '';
+    document.getElementById('s-potm-discord-mentions').value = s.potm_discord_webhook_mentions || '';
     const intervalEl = document.getElementById('potm-interval-display');
     if (intervalEl) intervalEl.textContent = s.potm_upgrade_interval_months || 6;
     updatePackCountButtons(s);
@@ -1448,12 +1466,16 @@ async function saveSettings() {
     chaos_club_product_id: document.getElementById('s-chaos-product').value.trim(),
     potm_product_id: document.getElementById('s-potm-product').value.trim(),
     potm_upgrade_interval_months: parseInt(document.getElementById('s-potm-interval').value) || 6,
+    potm_discord_webhook_url: document.getElementById('s-potm-discord-webhook').value.trim(),
+    potm_discord_webhook_mentions: document.getElementById('s-potm-discord-mentions').value.trim(),
   };
 
   try {
     await api('/api/settings', { method: 'POST', body: { settings } });
     currentSettings = settings;
     updatePackCountButtons(settings);
+    const intervalEl = document.getElementById('potm-interval-display');
+    if (intervalEl) intervalEl.textContent = settings.potm_upgrade_interval_months || 6;
     showAlert('settings-alert', '✅ Settings saved!', 'success');
   } catch(e) {
     showAlert('settings-alert', 'Save failed: ' + e.message);
@@ -1667,24 +1689,31 @@ function renderPotmSubscribers(subs) {
   const interval = parseInt(document.getElementById('s-potm-interval')?.value) || (currentSettings?.potm_upgrade_interval_months) || 6;
   const tbody = document.getElementById('potm-tbody');
   if (!subs.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px;">No POTM subscribers yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:32px;">No POTM subscribers yet</td></tr>';
     return;
   }
   tbody.innerHTML = subs.map(s => {
     const statusClass = { active: 'badge-green', paused: 'badge-yellow', cancelled: 'badge-red' }[s.status] || 'badge-blue';
     const startFmt = s.start_date ? localDate(s.start_date).toLocaleDateString() : '—';
+    const renewalFmt = s.last_renewal_date ? localDate(s.last_renewal_date).toLocaleDateString() : '—';
     const upgradeFmt = s.last_upgrade_date ? localDate(s.last_upgrade_date).toLocaleDateString() : '—';
     const months = s.months_renewed || 0;
     const remainder = months % interval;
     const monthsToNext = remainder === 0 ? (months === 0 ? interval : 0) : interval - remainder;
     const dueNow = months > 0 && remainder === 0;
+    const renewalAgeDays = s.last_renewal_date ? Math.floor((Date.now() - localDate(s.last_renewal_date).getTime()) / 86400000) : null;
+    const staleRenewal = renewalAgeDays !== null && renewalAgeDays > 35;
     const nextUpgradeCell = dueNow
       ? `<span style="color:var(--accent);font-weight:700">🌟 Due now!</span>`
       : `<span style="color:var(--muted)">${monthsToNext} mo</span>`;
+    const renewalCell = staleRenewal
+      ? `<span style="color:var(--warning);font-weight:700">${renewalFmt}</span><br><span style="color:var(--warning);font-size:0.76rem">stale</span>`
+      : renewalFmt;
     return `<tr>
       <td><strong>${s.name}</strong><br><span style="color:var(--muted);font-size:0.78rem">${s.email||''}</span></td>
       <td>${startFmt}</td>
       <td>${months}</td>
+      <td style="font-size:0.85rem">${renewalCell}</td>
       <td>${nextUpgradeCell}</td>
       <td>${s.collector_upgrade_count || 0}</td>
       <td style="font-size:0.85rem">${upgradeFmt}</td>
@@ -1714,13 +1743,14 @@ function openPotmModal(id) {
     document.getElementById('pm-renewal-day').value = s.renewal_day || '';
     document.getElementById('pm-months').value = s.months_renewed || 0;
     document.getElementById('pm-upgrades').value = s.collector_upgrade_count || 0;
+    document.getElementById('pm-last-renewal').value = s.last_renewal_date ? s.last_renewal_date.slice(0,10) : '';
     document.getElementById('pm-last-upgrade').value = s.last_upgrade_date ? s.last_upgrade_date.slice(0,10) : '';
     document.getElementById('pm-status').value = s.status || 'active';
     document.getElementById('pm-notes').value = s.notes || '';
   } else {
     document.getElementById('potm-modal-title').textContent = 'Add POTM Subscriber';
     document.getElementById('potm-modal-id').value = '';
-    ['pm-name','pm-email','pm-customer-id','pm-start-date','pm-renewal-day','pm-last-upgrade','pm-notes'].forEach(id => document.getElementById(id).value = '');
+    ['pm-name','pm-email','pm-customer-id','pm-start-date','pm-renewal-day','pm-last-renewal','pm-last-upgrade','pm-notes'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('pm-months').value = 0;
     document.getElementById('pm-upgrades').value = 0;
     document.getElementById('pm-status').value = 'active';
@@ -1748,6 +1778,7 @@ async function savePotmSubscriber() {
     renewal_day: parseInt(document.getElementById('pm-renewal-day').value) || null,
     months_renewed: parseInt(document.getElementById('pm-months').value) || 0,
     collector_upgrade_count: parseInt(document.getElementById('pm-upgrades').value) || 0,
+    last_renewal_date: document.getElementById('pm-last-renewal').value || null,
     last_upgrade_date: document.getElementById('pm-last-upgrade').value || null,
     status: document.getElementById('pm-status').value,
     notes: document.getElementById('pm-notes').value.trim() || null,
@@ -1792,6 +1823,42 @@ async function recordPotmRenewal(id, name) {
   } catch(e) {
     alert('Failed to record renewal: ' + e.message);
     await loadPotmSubscribers();
+  }
+}
+
+async function reconcilePotmSubscribers() {
+  if (!confirm('Scan Shopify paid POTM orders and catch up any subscribers whose renewal count is behind?')) return;
+
+  const btn = document.getElementById('potm-reconcile-btn');
+  btn.disabled = true;
+  btn.textContent = 'Reconciling…';
+
+  try {
+    const result = await api('/api/potm/subscribers/reconcile', { method: 'POST', body: {} });
+    await loadPotmSubscribers();
+
+    if (!result.updated_count) {
+      alert(result.unmatched_count
+        ? `No POTM subscribers needed updates.\n${result.unmatched_count} subscriber${result.unmatched_count !== 1 ? 's were' : ' was'} not matched to Shopify paid orders.`
+        : 'No POTM subscribers needed updates.');
+      return;
+    }
+
+    const preview = result.updated_subscribers.slice(0, 8).map(s => {
+      const added = s.months_added > 0 ? `+${s.months_added} month${s.months_added !== 1 ? 's' : ''}` : 'timestamp refreshed';
+      const upgrades = s.missed_upgrades ? `, ${s.missed_upgrades} upgrade milestone${s.missed_upgrades !== 1 ? 's' : ''}` : '';
+      return `${s.name}: ${added}${upgrades}`;
+    }).join('\n');
+
+    const overflow = result.updated_count > 8 ? `\n…and ${result.updated_count - 8} more.` : '';
+    const unmatched = result.unmatched_count ? `\n${result.unmatched_count} subscriber${result.unmatched_count !== 1 ? 's were' : ' was'} not matched to Shopify paid orders.` : '';
+
+    alert(`✅ Reconciled ${result.updated_count} POTM subscriber${result.updated_count !== 1 ? 's' : ''}.\n\n${preview}${overflow}${unmatched}`);
+  } catch (e) {
+    alert('POTM reconciliation failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↺ Catch Up from Orders';
   }
 }
 

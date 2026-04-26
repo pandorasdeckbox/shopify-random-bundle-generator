@@ -161,10 +161,13 @@ npm start
 
 ### Pack of the Month (POTM)
 - Monthly single-pack subscriptions tracked independently from Chaos Club
-- Each subscriber has a month count, upgrade interval (default 6), and last upgrade date
+- Each subscriber has a month count, last renewal date, upgrade interval (default 6), and last upgrade date
 - **Collector upgrade**: when `months_renewed % upgrade_interval === 0`, the subscriber is flagged for a Collector Booster pack
 - **Manual renewal**: use the **+1 Month** button in the Pack of Month tab — it increments the month count and immediately alerts you if an upgrade is due
-- **Webhook renewal**: if the POTM Product ID is configured in Settings, paying a POTM order auto-increments the subscriber's month count silently (no alert — use the manual button for real-time notification)
+- **Catch up**: use **Catch Up from Orders** to scan Shopify paid orders and reconcile subscribers whose month counts fell behind
+- **Webhook renewal**: if the POTM Product ID is configured in Settings, paying a POTM order auto-increments the subscriber's month count and records the renewal date automatically
+- **Automatic order edit**: when a webhook renewal hits the collector interval, the app attempts to add a `COLLECTOR UPGRADE` custom line item priced at `$0.00` to the Shopify order
+- **Discord alert**: if a POTM Discord webhook URL is configured in Settings, every collector milestone posts a staff notification automatically
 - Subscribers can be imported from a CSV via the Import button
 
 ### D20 Upgrade System (Chaos Club)
@@ -188,7 +191,9 @@ When an `orders/paid` webhook fires:
 4. The bundle is saved to history
 5. The subscriber's `months_renewed` counter is updated, and if a D20 upgrade occurred, `collector_upgrade_count` and `last_upgrade_date` are also recorded
 
-The webhook also checks for the configured Pack of the Month Product ID. If found, the matching POTM subscriber's month count is incremented and their collector upgrade milestone is checked (see below).
+The webhook also checks for the configured Pack of the Month Product ID. If found, the matching POTM subscriber's month count is incremented, their renewal date is recorded, and their collector upgrade milestone is checked (see below). If a Discord webhook is configured, collector milestones are posted there automatically.
+
+Order-edit automation for POTM requires the Shopify `write_order_edits` scope. After deploying this version, reauthorize or reinstall the app so Shopify grants the new scope before expecting automatic `COLLECTOR UPGRADE` line items to appear.
 
 The DOCX packing slip must be downloaded manually from the History tab after the webhook fires.
 

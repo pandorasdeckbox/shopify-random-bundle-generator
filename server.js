@@ -43,6 +43,8 @@ import {
   createPotmSubscriber,
   updatePotmSubscriber,
   deletePotmSubscriber,
+  getPotmOrderProcessing,
+  savePotmOrderProcessing,
 } from './database.js';
 
 import {
@@ -63,6 +65,7 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const POTM_UPGRADE_CUSTOM_ITEM_TITLE = 'COLLECTOR UPGRADE';
 
 // ─── Init DB first, then everything else ─────────────────────────────────────
 
@@ -102,7 +105,7 @@ const oauthStateStorage = new Map();
 const shopify = shopifyApi({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET,
-  scopes: ['read_products', 'write_inventory', 'read_inventory', 'read_orders', 'read_customers'],
+  scopes: ['read_products', 'write_inventory', 'read_inventory', 'read_orders', 'read_customers', 'write_order_edits'],
   hostName: process.env.APP_URL?.replace(/https?:\/\//, '') || 'localhost',
   hostScheme: 'https',
   apiVersion: ApiVersion.January24,
@@ -174,7 +177,7 @@ app.get('/auth', async (req, res) => {
 
     const authUrl = `https://${sanitizedShop}/admin/oauth/authorize?` + new URLSearchParams({
       client_id: process.env.SHOPIFY_API_KEY,
-      scope: 'read_products,write_inventory,read_inventory,read_orders,read_customers',
+      scope: 'read_products,write_inventory,read_inventory,read_orders,read_customers,write_order_edits',
       redirect_uri: `${process.env.APP_URL}/auth/callback`,
       state,
     }).toString();
@@ -246,6 +249,228 @@ async function verifySession(req, res, next) {
   log('INFO', `Session verified`, { shop });
   req.shopifySession = session;
   next();
+}
+
+function toDateOnly(value) {
+  if (!value) return null;
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+function latestDate(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return a >= b ? a : b;
+}
+
+function matchesConfiguredProduct(productId, configuredGid) {
+  if (!configuredGid) return false;
+  const gid = `gid://shopify/Product/${productId}`;
+  return gid === configuredGid || String(productId) === String(configuredGid).split('/').pop();
+}
+
+function getExpectedPotmUpgrade(orderDates, interval) {
+  const collectorUpgradeCount = Math.floor(orderDates.length / interval);
+  const milestoneIndex = collectorUpgradeCount > 0 ? (collectorUpgradeCount * interval) - 1 : -1;
+  return {
+    collector_upgrade_count: collectorUpgradeCount,
+    last_upgrade_date: milestoneIndex >= 0 ? orderDates[milestoneIndex] : null,
+  };
+}
+
+async function sendDiscordWebhook(url, payload) {
+  if (!url) return;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Discord webhook failed: ${response.status} ${response.statusText}`);
+  }
+}
+
+async function sendPotmUpgradeDiscordAlert(settings, subscriber, details) {
+  if (!settings.potm_discord_webhook_url) return;
+
+  const mentionLine = settings.potm_discord_webhook_mentions?.trim();
+  const customerLine = subscriber.email ? `${subscriber.name} (${subscriber.email})` : subscriber.name;
+  const content = [
+    mentionLine || null,
+    `Collector upgrade due for **${customerLine}**.`,
+    `Month ${details.months} hit on ${details.renewalDate}.`,
+    'Include the free collector upgrade in this shipment.',
+  ].filter(Boolean).join('\n');
+
+  await sendDiscordWebhook(settings.potm_discord_webhook_url, {
+    username: 'Bundle Generator',
+    content,
+  });
+}
+
+function formatGraphqlUserErrors(userErrors = []) {
+  return userErrors.map(error => error.message).filter(Boolean).join('; ');
+}
+
+async function beginOrderEdit(client, orderId) {
+  const mutation = `
+    mutation BeginOrderEdit($id: ID!) {
+      orderEditBegin(id: $id) {
+        calculatedOrder { id }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const response = await client.request(mutation, {
+    variables: { id: `gid://shopify/Order/${orderId}` },
+  });
+
+  const payload = response.data.orderEditBegin;
+  if (payload.userErrors?.length) {
+    throw new Error(formatGraphqlUserErrors(payload.userErrors));
+  }
+
+  return payload.calculatedOrder?.id || null;
+}
+
+async function addCustomItemToOrderEdit(client, calculatedOrderId, currencyCode, title) {
+  const mutation = `
+    mutation AddCustomItemToOrderEdit($id: ID!, $title: String!, $price: MoneyInput!, $quantity: Int!) {
+      orderEditAddCustomItem(
+        id: $id,
+        title: $title,
+        price: $price,
+        quantity: $quantity,
+        taxable: false,
+        requiresShipping: false
+      ) {
+        calculatedLineItem { id title quantity }
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const response = await client.request(mutation, {
+    variables: {
+      id: calculatedOrderId,
+      title,
+      quantity: 1,
+      price: { amount: '0.00', currencyCode },
+    },
+  });
+
+  const payload = response.data.orderEditAddCustomItem;
+  if (payload.userErrors?.length) {
+    throw new Error(formatGraphqlUserErrors(payload.userErrors));
+  }
+
+  return payload.calculatedLineItem || null;
+}
+
+async function commitOrderEdit(client, calculatedOrderId, staffNote) {
+  const mutation = `
+    mutation CommitOrderEdit($id: ID!, $staffNote: String) {
+      orderEditCommit(id: $id, notifyCustomer: false, staffNote: $staffNote) {
+        order { id }
+        successMessages
+        userErrors { field message }
+      }
+    }
+  `;
+
+  const response = await client.request(mutation, {
+    variables: { id: calculatedOrderId, staffNote },
+  });
+
+  const payload = response.data.orderEditCommit;
+  if (payload.userErrors?.length) {
+    throw new Error(formatGraphqlUserErrors(payload.userErrors));
+  }
+
+  return payload;
+}
+
+async function autoAddPotmUpgradeCustomItem({ session, order, subscriberName }) {
+  if (!order?.id) throw new Error('Missing Shopify order ID');
+  if (!order?.currency) throw new Error('Missing Shopify order currency');
+
+  const client = new shopify.clients.Graphql({ session });
+  const calculatedOrderId = await beginOrderEdit(client, order.id);
+  if (!calculatedOrderId) throw new Error('Shopify did not return a calculated order ID');
+
+  await addCustomItemToOrderEdit(client, calculatedOrderId, order.currency, POTM_UPGRADE_CUSTOM_ITEM_TITLE);
+
+  return commitOrderEdit(
+    client,
+    calculatedOrderId,
+    `Auto-added ${POTM_UPGRADE_CUSTOM_ITEM_TITLE} for POTM milestone on ${order.name || `order ${order.id}`} for ${subscriberName || 'subscriber'}`
+  );
+}
+
+async function buildPotmOrderSummary(session, configuredProductId) {
+  const client = new shopify.clients.Rest({ session });
+  const orderMap = new Map();
+
+  let sinceId = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const response = await client.get({
+      path: 'orders',
+      query: {
+        limit: 250,
+        status: 'any',
+        created_at_min: '2018-01-01T00:00:00Z',
+        since_id: sinceId,
+        fields: 'id,name,created_at,processed_at,cancelled_at,financial_status,customer,line_items',
+      },
+    });
+
+    const orders = response.body.orders || [];
+
+    for (const order of orders) {
+      if (!order.customer || order.cancelled_at) continue;
+      if (order.financial_status && order.financial_status !== 'paid') continue;
+
+      const lineItem = (order.line_items || []).find(item => matchesConfiguredProduct(item.product_id, configuredProductId));
+      if (!lineItem) continue;
+
+      const customerId = String(order.customer.id);
+      const orderDate = toDateOnly(order.processed_at || order.created_at);
+
+      if (!orderMap.has(customerId)) {
+        orderMap.set(customerId, {
+          shopify_customer_id: customerId,
+          name: `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() || `Customer ${customerId}`,
+          email: order.customer.email || null,
+          first_order_date: orderDate,
+          last_order_date: orderDate,
+          months_renewed: 1,
+          order_dates: [orderDate],
+        });
+      } else {
+        const existing = orderMap.get(customerId);
+        existing.months_renewed += 1;
+        existing.order_dates.push(orderDate);
+        if (orderDate < existing.first_order_date) existing.first_order_date = orderDate;
+        if (orderDate > existing.last_order_date) existing.last_order_date = orderDate;
+      }
+    }
+
+    if (orders.length === 250) {
+      sinceId = orders[orders.length - 1].id;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  for (const summary of orderMap.values()) {
+    summary.order_dates.sort();
+  }
+
+  return orderMap;
 }
 
 // ─── API: Shop Info ───────────────────────────────────────────────────────────
@@ -824,45 +1049,7 @@ app.get('/api/potm/subscribers/import-preview', verifySession, async (req, res) 
     const potmProductId = req.query.product_gid || settings.potm_product_id;
     if (!potmProductId) return res.status(400).json({ error: 'No POTM product selected.' });
 
-    const numericId = String(potmProductId).split('/').pop();
-    const client = new shopify.clients.Rest({ session: req.shopifySession });
-    const orderMap = new Map();
-
-    let sinceId = 0;
-    let hasMore = true;
-    while (hasMore) {
-      const response = await client.get({
-        path: 'orders',
-        query: { limit: 250, status: 'any', created_at_min: '2018-01-01T00:00:00Z', since_id: sinceId, fields: 'id,created_at,customer,line_items' },
-      });
-      const orders = response.body.orders || [];
-
-      for (const order of orders) {
-        if (!order.customer) continue;
-        const lineItem = (order.line_items || []).find(li => String(li.product_id) === numericId);
-        if (!lineItem) continue;
-
-        const custId = String(order.customer.id);
-        const orderDate = new Date(order.created_at);
-
-        if (!orderMap.has(custId)) {
-          orderMap.set(custId, {
-            shopify_customer_id: custId,
-            name: `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() || `Customer ${custId}`,
-            email: order.customer.email || null,
-            first_order_date: order.created_at,
-            months_renewed: 1,
-          });
-        } else {
-          const existing = orderMap.get(custId);
-          existing.months_renewed += 1;
-          if (orderDate < new Date(existing.first_order_date)) existing.first_order_date = order.created_at;
-        }
-      }
-
-      if (orders.length === 250) sinceId = orders[orders.length - 1].id;
-      else hasMore = false;
-    }
+    const orderMap = await buildPotmOrderSummary(req.shopifySession, potmProductId);
 
     const existingSubs = await getPotmSubscribers(shop);
     const existingIds = new Set(existingSubs.map(s => String(s.shopify_customer_id)).filter(Boolean));
@@ -901,6 +1088,7 @@ app.post('/api/potm/subscribers/import', verifySession, async (req, res) => {
         start_date: c.first_order_date ? c.first_order_date.slice(0, 10) : null,
         months_renewed: c.months_renewed || 0,
         collector_upgrade_count: 0,
+        last_renewal_date: c.last_order_date || null,
         last_upgrade_date: null,
         status: 'active',
       });
@@ -931,6 +1119,7 @@ app.post('/api/potm/subscribers/:id/renew', verifySession, async (req, res) => {
     const updated = await updatePotmSubscriber(shop, sub.id, {
       ...sub,
       months_renewed: newMonths,
+      last_renewal_date: toDateOnly(new Date()),
       ...(upgraded ? {
         collector_upgrade_count: (sub.collector_upgrade_count || 0) + 1,
         last_upgrade_date: new Date().toISOString().slice(0, 10),
@@ -942,11 +1131,104 @@ app.post('/api/potm/subscribers/:id/renew', verifySession, async (req, res) => {
       return res.status(500).json({ error: 'Database update failed — subscriber not found or not updated' });
     }
 
+    if (upgraded) {
+      try {
+        await sendPotmUpgradeDiscordAlert(settings, updated, {
+          months: updated.months_renewed,
+          renewalDate: updated.last_renewal_date,
+        });
+      } catch (notifyErr) {
+        log('WARN', 'Failed to send POTM Discord alert', { error: notifyErr.message, subscriber_id: updated.id });
+      }
+    }
+
     log('INFO', `POTM renewal recorded for ${sub.name}`, { months: updated.months_renewed, upgraded });
     res.json({ subscriber: updated, upgraded, months: updated.months_renewed });
   } catch (err) {
     console.error('POTM renew error:', err.message);
     res.status(500).json({ error: 'Failed to record renewal: ' + err.message });
+  }
+});
+
+app.post('/api/potm/subscribers/reconcile', verifySession, async (req, res) => {
+  try {
+    const shop = req.shopifySession.shop;
+    const settings = await getSettings(shop);
+    const interval = settings.potm_upgrade_interval_months || 6;
+
+    if (!settings.potm_product_id) {
+      return res.status(400).json({ error: 'Set the Pack of the Month product ID in Settings first.' });
+    }
+
+    const orderMap = await buildPotmOrderSummary(req.shopifySession, settings.potm_product_id);
+    const existingSubs = await getPotmSubscribers(shop);
+    const updatedSubscribers = [];
+    const unmatchedSubscribers = [];
+
+    for (const sub of existingSubs) {
+      if (!sub.shopify_customer_id || sub.status !== 'active') continue;
+
+      const orderSummary = orderMap.get(String(sub.shopify_customer_id));
+      if (!orderSummary) {
+        unmatchedSubscribers.push({
+          id: sub.id,
+          name: sub.name,
+          months_renewed: sub.months_renewed || 0,
+          last_renewal_date: sub.last_renewal_date || null,
+        });
+        continue;
+      }
+
+      const expectedUpgrade = getExpectedPotmUpgrade(orderSummary.order_dates, interval);
+      const reconciledMonths = Math.max(sub.months_renewed || 0, orderSummary.months_renewed || 0);
+      const reconciledUpgradeCount = Math.max(sub.collector_upgrade_count || 0, expectedUpgrade.collector_upgrade_count || 0);
+      const reconciledLastUpgrade = latestDate(sub.last_upgrade_date || null, expectedUpgrade.last_upgrade_date || null);
+      const earliestStartDate = sub.start_date && orderSummary.first_order_date
+        ? (sub.start_date <= orderSummary.first_order_date ? sub.start_date : orderSummary.first_order_date)
+        : (sub.start_date || orderSummary.first_order_date || null);
+      const nextLastRenewal = orderSummary.last_order_date || sub.last_renewal_date || null;
+
+      const shouldUpdate =
+        reconciledMonths !== (sub.months_renewed || 0)
+        || reconciledUpgradeCount !== (sub.collector_upgrade_count || 0)
+        || nextLastRenewal !== (sub.last_renewal_date || null)
+        || reconciledLastUpgrade !== (sub.last_upgrade_date || null)
+        || earliestStartDate !== (sub.start_date || null)
+        || (!sub.email && orderSummary.email);
+
+      if (!shouldUpdate) continue;
+
+      const updated = await updatePotmSubscriber(shop, sub.id, {
+        ...sub,
+        email: sub.email || orderSummary.email || null,
+        start_date: earliestStartDate,
+        months_renewed: reconciledMonths,
+        collector_upgrade_count: reconciledUpgradeCount,
+        last_renewal_date: nextLastRenewal,
+        last_upgrade_date: reconciledLastUpgrade,
+      });
+
+      updatedSubscribers.push({
+        id: updated.id,
+        name: updated.name,
+        previous_months: sub.months_renewed || 0,
+        months_renewed: updated.months_renewed || 0,
+        months_added: (updated.months_renewed || 0) - (sub.months_renewed || 0),
+        previous_last_renewal_date: sub.last_renewal_date || null,
+        last_renewal_date: updated.last_renewal_date || null,
+        missed_upgrades: Math.max(0, (updated.collector_upgrade_count || 0) - (sub.collector_upgrade_count || 0)),
+      });
+    }
+
+    res.json({
+      updated_count: updatedSubscribers.length,
+      unmatched_count: unmatchedSubscribers.length,
+      updated_subscribers: updatedSubscribers,
+      unmatched_subscribers: unmatchedSubscribers,
+    });
+  } catch (err) {
+    console.error('POTM reconcile error:', err.message);
+    res.status(500).json({ error: 'Failed to reconcile POTM subscribers: ' + err.message });
   }
 });
 
@@ -1022,14 +1304,8 @@ app.post('/webhooks/orders-paid', async (req, res) => {
     const settings = await getSettings(shop);
     const lineItems = order.line_items || [];
 
-    const matchesProduct = (productId, configuredGid) => {
-      if (!configuredGid) return false;
-      const gid = `gid://shopify/Product/${productId}`;
-      return gid === configuredGid || String(productId) === String(configuredGid).split('/').pop();
-    };
-
     // ── Chaos Club branch ──────────────────────────────────────────────────
-    const chaosItem = lineItems.find(item => matchesProduct(item.product_id, settings.chaos_club_product_id));
+    const chaosItem = lineItems.find(item => matchesConfiguredProduct(item.product_id, settings.chaos_club_product_id));
     if (chaosItem) {
       console.log(`🎲 Chaos Club renewal detected for customer ${order.customer?.id}`);
 
@@ -1097,40 +1373,121 @@ app.post('/webhooks/orders-paid', async (req, res) => {
     }
 
     // ── Pack of the Month branch ───────────────────────────────────────────
-    const potmItem = lineItems.find(item => matchesProduct(item.product_id, settings.potm_product_id));
+    const potmItem = lineItems.find(item => matchesConfiguredProduct(item.product_id, settings.potm_product_id));
     if (potmItem) {
       console.log(`🎴 Pack of the Month renewal detected for customer ${order.customer?.id}`);
 
+      const shopifyOrderId = String(order.id);
       const upgradeInterval = settings.potm_upgrade_interval_months || 6;
-      const subscriber = order.customer?.id
+      const renewalDate = toDateOnly(order.processed_at || order.created_at || new Date());
+      let subscriber = order.customer?.id
         ? await getPotmSubscriberByCustomerId(shop, String(order.customer.id))
         : null;
 
-      const newMonths = (subscriber?.months_renewed || 0) + 1;
-      const hitUpgrade = newMonths > 0 && newMonths % upgradeInterval === 0;
+      let processing = await getPotmOrderProcessing(shop, shopifyOrderId) || null;
+      const saveProcessing = async (updates = {}) => {
+        processing = await savePotmOrderProcessing(shop, shopifyOrderId, {
+          shopify_order_name: order.name || processing?.shopify_order_name || null,
+          potm_subscriber_id: updates.potm_subscriber_id ?? processing?.potm_subscriber_id ?? subscriber?.id ?? null,
+          renewal_processed: updates.renewal_processed ?? processing?.renewal_processed ?? false,
+          renewal_date: updates.renewal_date ?? processing?.renewal_date ?? null,
+          months_after: updates.months_after ?? processing?.months_after ?? null,
+          upgrade_due: updates.upgrade_due ?? processing?.upgrade_due ?? false,
+          discord_alert_sent: updates.discord_alert_sent ?? processing?.discord_alert_sent ?? false,
+          upgrade_line_item_added: updates.upgrade_line_item_added ?? processing?.upgrade_line_item_added ?? false,
+          order_edit_message: updates.order_edit_message ?? processing?.order_edit_message ?? null,
+        });
+        return processing;
+      };
 
-      if (subscriber) {
-        await updatePotmSubscriber(shop, subscriber.id, {
-          ...subscriber,
-          months_renewed: newMonths,
-          ...(hitUpgrade ? {
-            collector_upgrade_count: (subscriber.collector_upgrade_count || 0) + 1,
-            last_upgrade_date: new Date().toISOString().slice(0, 10),
-          } : {}),
+      let monthsAfter = Number(processing?.months_after || 0);
+      let hitUpgrade = Boolean(processing?.upgrade_due);
+
+      if (!Boolean(processing?.renewal_processed)) {
+        const newMonths = (subscriber?.months_renewed || 0) + 1;
+        hitUpgrade = newMonths > 0 && newMonths % upgradeInterval === 0;
+
+        if (subscriber) {
+          subscriber = await updatePotmSubscriber(shop, subscriber.id, {
+            ...subscriber,
+            months_renewed: newMonths,
+            last_renewal_date: renewalDate,
+            ...(hitUpgrade ? {
+              collector_upgrade_count: (subscriber.collector_upgrade_count || 0) + 1,
+              last_upgrade_date: renewalDate,
+            } : {}),
+          });
+          monthsAfter = subscriber.months_renewed || newMonths;
+          console.log(`✅ POTM subscriber updated: ${subscriber.name} — ${monthsAfter} months${hitUpgrade ? ' 🌟 Collector upgrade triggered!' : ''}`);
+        } else {
+          subscriber = await createPotmSubscriber(shop, {
+            shopify_customer_id: order.customer ? String(order.customer.id) : null,
+            name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}`.trim() : 'Subscriber',
+            email: order.customer?.email || null,
+            start_date: renewalDate,
+            months_renewed: 1,
+            collector_upgrade_count: 0,
+            last_renewal_date: renewalDate,
+            ...(hitUpgrade ? { collector_upgrade_count: 1, last_upgrade_date: renewalDate } : {}),
+            status: 'active',
+          });
+          monthsAfter = subscriber.months_renewed || 1;
+          console.log(`✅ POTM new subscriber auto-created: ${subscriber.name}`);
+        }
+
+        await saveProcessing({
+          potm_subscriber_id: subscriber?.id || null,
+          renewal_processed: true,
+          renewal_date: renewalDate,
+          months_after: monthsAfter,
+          upgrade_due: hitUpgrade,
         });
-        console.log(`✅ POTM subscriber updated: ${subscriber.name} — ${newMonths} months${hitUpgrade ? ' 🌟 Collector upgrade triggered!' : ''}`);
       } else {
-        // Auto-create subscriber record on first order
-        const newSub = await createPotmSubscriber(shop, {
-          shopify_customer_id: order.customer ? String(order.customer.id) : null,
-          name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}`.trim() : 'Subscriber',
-          email: order.customer?.email || null,
-          start_date: new Date().toISOString().slice(0, 10),
-          months_renewed: 1,
-          collector_upgrade_count: 0,
-          status: 'active',
-        });
-        console.log(`✅ POTM new subscriber auto-created: ${newSub.name}`);
+        log('INFO', 'POTM renewal already processed for this Shopify order', { shop, shopify_order_id: shopifyOrderId });
+        if (!subscriber && processing?.potm_subscriber_id) {
+          subscriber = await getPotmSubscriber(shop, processing.potm_subscriber_id);
+        }
+      }
+
+      if (hitUpgrade && subscriber && !Boolean(processing?.discord_alert_sent)) {
+        try {
+          await sendPotmUpgradeDiscordAlert(settings, subscriber, { months: monthsAfter, renewalDate });
+          await saveProcessing({ discord_alert_sent: true });
+        } catch (notifyErr) {
+          log('WARN', 'Failed to send POTM Discord alert', { error: notifyErr.message, shop, customer_id: order.customer?.id });
+        }
+      }
+
+      if (hitUpgrade && !Boolean(processing?.upgrade_line_item_added)) {
+        if (lineItems.some(item => item.title === POTM_UPGRADE_CUSTOM_ITEM_TITLE)) {
+          await saveProcessing({
+            upgrade_line_item_added: true,
+            order_edit_message: `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} already present on order payload.`,
+          });
+        } else {
+          const session = await sessionStorage.loadSession(`offline_${shop}`);
+          if (!session) {
+            log('WARN', 'No session found for POTM order edit', { shop, shopify_order_id: shopifyOrderId });
+            await saveProcessing({ order_edit_message: 'No offline Shopify session available for order edit.' });
+          } else {
+            try {
+              const commitResult = await autoAddPotmUpgradeCustomItem({
+                session,
+                order,
+                subscriberName: subscriber?.name,
+              });
+
+              await saveProcessing({
+                upgrade_line_item_added: true,
+                order_edit_message: commitResult.successMessages?.join('; ') || `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} added automatically.`,
+              });
+              log('SUCCESS', 'POTM collector upgrade custom item added to Shopify order', { shop, shopify_order_id: shopifyOrderId });
+            } catch (editErr) {
+              await saveProcessing({ order_edit_message: `Auto-add failed: ${editErr.message}` });
+              log('WARN', 'Failed to auto-add POTM collector upgrade custom item', { error: editErr.message, shop, shopify_order_id: shopifyOrderId });
+            }
+          }
+        }
       }
     }
 
