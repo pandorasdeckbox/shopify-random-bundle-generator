@@ -375,7 +375,6 @@ async function commitOrderEdit(client, calculatedOrderId, staffNote) {
     mutation CommitOrderEdit($id: ID!, $staffNote: String) {
       orderEditCommit(id: $id, notifyCustomer: false, staffNote: $staffNote) {
         order { id }
-        successMessages
         userErrors { field message }
       }
     }
@@ -1264,13 +1263,13 @@ app.post('/api/potm/subscribers/:id/add-upgrade-to-latest-order', verifySession,
       });
     }
 
-    const commitResult = await autoAddPotmUpgradeCustomItem({
+    await autoAddPotmUpgradeCustomItem({
       session,
       order,
       subscriberName: subscriber.name,
     });
 
-    const message = commitResult.successMessages?.join('; ') || `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} added automatically.`;
+    const message = `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} added automatically.`;
     await saveProcessing({
       upgrade_line_item_added: true,
       order_edit_message: message,
@@ -1611,7 +1610,7 @@ app.post('/webhooks/orders-paid', async (req, res) => {
             await saveProcessing({ order_edit_message: 'No offline Shopify session available for order edit.' });
           } else {
             try {
-              const commitResult = await autoAddPotmUpgradeCustomItem({
+              await autoAddPotmUpgradeCustomItem({
                 session,
                 order,
                 subscriberName: subscriber?.name,
@@ -1619,7 +1618,7 @@ app.post('/webhooks/orders-paid', async (req, res) => {
 
               await saveProcessing({
                 upgrade_line_item_added: true,
-                order_edit_message: commitResult.successMessages?.join('; ') || `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} added automatically.`,
+                order_edit_message: `${POTM_UPGRADE_CUSTOM_ITEM_TITLE} added automatically.`,
               });
               log('SUCCESS', 'POTM collector upgrade custom item added to Shopify order', { shop, shopify_order_id: shopifyOrderId });
             } catch (editErr) {
