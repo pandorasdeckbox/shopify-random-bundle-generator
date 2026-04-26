@@ -1737,9 +1737,7 @@ function renderPotmSubscribers(subs) {
     const renewalAgeDays = s.last_renewal_date ? Math.floor((Date.now() - localDate(s.last_renewal_date).getTime()) / 86400000) : null;
     const staleRenewal = renewalAgeDays !== null && renewalAgeDays > 35;
     const latestOrderProcessing = s.latest_order_processing;
-    const currentMilestoneProcessing = latestOrderProcessing
-      && Number(latestOrderProcessing.months_after || 0) === months
-      && Boolean(latestOrderProcessing.upgrade_due);
+    const currentMilestoneProcessing = s.current_milestone_processing || null;
     const currentMilestoneAdded = Boolean(currentMilestoneProcessing?.upgrade_line_item_added);
     const nextUpgradeCell = dueNow && !currentMilestoneAdded
       ? `<span style="color:var(--accent);font-weight:700">Current</span>`

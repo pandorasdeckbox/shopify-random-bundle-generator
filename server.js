@@ -45,7 +45,7 @@ import {
   deletePotmSubscriber,
   getPotmOrderProcessing,
   savePotmOrderProcessing,
-  getLatestPotmOrderProcessingBySubscriber,
+  getPotmOrderProcessingBySubscriber,
 } from './database.js';
 
 import {
@@ -1060,18 +1060,25 @@ app.post('/api/subscribers/import', verifySession, async (req, res) => {
 app.get('/api/potm/subscribers', verifySession, async (req, res) => {
   try {
     const shop = req.shopifySession.shop;
-    const [subs, latestProcessingRows] = await Promise.all([
+    const [subs, processingRows] = await Promise.all([
       getPotmSubscribers(shop),
-      getLatestPotmOrderProcessingBySubscriber(shop),
+      getPotmOrderProcessingBySubscriber(shop),
     ]);
 
-    const latestProcessingBySubscriberId = new Map(
-      latestProcessingRows.map(row => [row.potm_subscriber_id, row])
-    );
+    const processingBySubscriberId = new Map();
+    for (const row of processingRows) {
+      if (!processingBySubscriberId.has(row.potm_subscriber_id)) {
+        processingBySubscriberId.set(row.potm_subscriber_id, []);
+      }
+      processingBySubscriberId.get(row.potm_subscriber_id).push(row);
+    }
 
     const enrichedSubscribers = subs.map(sub => ({
       ...sub,
-      latest_order_processing: latestProcessingBySubscriberId.get(sub.id) || null,
+      latest_order_processing: processingBySubscriberId.get(sub.id)?.[0] || null,
+      current_milestone_processing: (processingBySubscriberId.get(sub.id) || []).find(row =>
+        Number(row.months_after || 0) === Number(sub.months_renewed || 0) && Boolean(row.upgrade_due)
+      ) || null,
     }));
 
     res.json({ subscribers: enrichedSubscribers });

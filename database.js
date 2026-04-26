@@ -652,10 +652,10 @@ export async function savePotmOrderProcessing(shop, shopifyOrderId, data) {
   }
 }
 
-export async function getLatestPotmOrderProcessingBySubscriber(shop) {
+export async function getPotmOrderProcessingBySubscriber(shop) {
   if (pgPool) {
     const result = await pgPool.query(
-      `SELECT DISTINCT ON (potm_subscriber_id) *
+      `SELECT *
        FROM potm_order_processing
        WHERE shop = $1 AND potm_subscriber_id IS NOT NULL
        ORDER BY potm_subscriber_id, updated_at DESC`,
@@ -669,12 +669,6 @@ export async function getLatestPotmOrderProcessingBySubscriber(shop) {
        ORDER BY updated_at DESC`
     ).all(shop);
 
-    const latestBySubscriber = new Map();
-    for (const row of rows) {
-      if (!latestBySubscriber.has(row.potm_subscriber_id)) {
-        latestBySubscriber.set(row.potm_subscriber_id, row);
-      }
-    }
-    return Array.from(latestBySubscriber.values());
+    return rows;
   }
 }
