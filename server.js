@@ -34,6 +34,8 @@ import {
   saveBundleHistory,
   getBundleHistory,
   getBundleById,
+  getBundleByShopifyOrderId,
+  getProcessedChaosOrderIds,
   saveDOCXTemplate,
   getDOCXTemplate,
   deleteDOCXTemplate,
@@ -501,6 +503,170 @@ async function findLatestPotmPaidOrderForCustomer(session, configuredProductId, 
   return matchingOrders[0] || null;
 }
 
+function getChaosPackCount(chaosItem, subscriber) {
+  const variantTitle = chaosItem?.variant_title || '';
+  const variantNum = parseInt(variantTitle.match(/\b(3|6|9|12)\b/)?.[1] || '0', 10);
+  return ([3, 6, 9, 12].includes(variantNum) ? variantNum : null)
+    || subscriber?.pack_count
+    || 3;
+}
+
+async function buildPendingChaosClubOrders(session, configuredProductId, processedOrderIds = new Set()) {
+  if (!configuredProductId) return [];
+
+  const client = new shopify.clients.Rest({ session });
+  const pendingOrders = [];
+
+  let sinceId = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const response = await client.get({
+      path: 'orders',
+      query: {
+        limit: 250,
+        status: 'any',
+        fulfillment_status: 'unfulfilled',
+        financial_status: 'paid',
+        created_at_min: '2018-01-01T00:00:00Z',
+        since_id: sinceId,
+        fields: 'id,name,created_at,processed_at,cancelled_at,financial_status,fulfillment_status,customer,line_items',
+      },
+    });
+
+    const orders = response.body.orders || [];
+
+    for (const order of orders) {
+      const orderId = String(order.id);
+      if (processedOrderIds.has(orderId)) continue;
+      if (order.cancelled_at) continue;
+      if (order.financial_status && order.financial_status !== 'paid') continue;
+
+      const chaosItem = (order.line_items || []).find(item => matchesConfiguredProduct(item.product_id, configuredProductId));
+      if (!chaosItem) continue;
+
+      const customerName = order.customer
+        ? `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() || `Customer ${order.customer.id}`
+        : 'Unknown customer';
+
+      pendingOrders.push({
+        id: orderId,
+        name: order.name || `Order ${orderId}`,
+        created_at: order.created_at || null,
+        processed_at: order.processed_at || null,
+        financial_status: order.financial_status || null,
+        fulfillment_status: order.fulfillment_status || null,
+        customer_name: customerName,
+        customer_email: order.customer?.email || null,
+        shopify_customer_id: order.customer?.id ? String(order.customer.id) : null,
+        pack_count: getChaosPackCount(chaosItem, null),
+      });
+    }
+
+    if (orders.length === 250) {
+      sinceId = orders[orders.length - 1].id;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  pendingOrders.sort((a, b) => {
+    const aTime = new Date(a.processed_at || a.created_at || 0).getTime();
+    const bTime = new Date(b.processed_at || b.created_at || 0).getTime();
+    return aTime - bTime;
+  });
+
+  return pendingOrders;
+}
+
+async function processChaosClubOrder({ shop, session, settings, order, dryRun = false }) {
+  if (!order?.id) throw new Error('Missing Shopify order ID');
+
+  const shopifyOrderId = String(order.id);
+  const existingBundle = !dryRun ? await getBundleByShopifyOrderId(shop, shopifyOrderId) : null;
+  if (existingBundle) {
+    return {
+      alreadyProcessed: true,
+      history: existingBundle,
+      orderName: order.name || existingBundle.shopify_order_name || `Order ${shopifyOrderId}`,
+    };
+  }
+
+  const lineItems = order.line_items || [];
+  const chaosItem = lineItems.find(item => matchesConfiguredProduct(item.product_id, settings.chaos_club_product_id));
+  if (!chaosItem) {
+    throw new Error('Order does not contain the configured Chaos Club product.');
+  }
+
+  const subscriber = order.customer?.id
+    ? await getSubscriberByCustomerId(shop, String(order.customer.id))
+    : null;
+
+  const packCount = getChaosPackCount(chaosItem, subscriber);
+  const { regular, collector } = await fetchBundleProducts(
+    new shopify.clients.Graphql({ session }),
+    settings.regular_pack_ids || [],
+    settings.collector_pack_ids || []
+  );
+
+  if (!regular.length) {
+    throw new Error('No regular packs configured. Go to Products tab and select eligible packs.');
+  }
+
+  const result = generateSubscriptionBundle(regular, collector, packCount, settings, {
+    enabled: true,
+    lastUpgradeDate: subscriber?.last_upgrade_date || null,
+  });
+
+  if (!result) {
+    throw new Error('Could not generate a Chaos Club bundle meeting margin requirements.');
+  }
+
+  const inventoryResults = await updateInventory(shopify, session, result.packs, dryRun);
+  const customerName = order.customer
+    ? `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() || 'Subscriber'
+    : 'Subscriber';
+  const d20 = result.d20Result;
+
+  const saved = await saveBundleHistory(shop, {
+    subscriber_id: subscriber?.id || null,
+    shopify_order_id: shopifyOrderId,
+    shopify_order_name: order.name || null,
+    bundle_type: 'Chaos Club',
+    customer_name: customerName,
+    pack_count: result.packs.length,
+    total_cost: result.metrics.total_cost,
+    total_retail: result.metrics.total_retail,
+    target_price: result.metrics.target_price,
+    margin_percent: result.metrics.margin_percent,
+    d20_roll: d20?.roll || null,
+    d20_upgraded: d20?.upgraded || false,
+    packs: result.packs,
+    dry_run: dryRun,
+  });
+
+  if (subscriber && !dryRun) {
+    await updateSubscriber(shop, subscriber.id, {
+      ...subscriber,
+      months_renewed: (subscriber.months_renewed || 0) + 1,
+      ...(d20?.upgraded ? {
+        collector_upgrade_count: (subscriber.collector_upgrade_count || 0) + 1,
+        last_upgrade_date: new Date().toISOString().slice(0, 10),
+      } : {}),
+    });
+  }
+
+  return {
+    alreadyProcessed: false,
+    history: saved,
+    result,
+    inventoryResults,
+    subscriber,
+    orderName: order.name || `Order ${shopifyOrderId}`,
+    packCount,
+  };
+}
+
 // ─── API: Shop Info ───────────────────────────────────────────────────────────
 
 app.get('/api/shop', verifySession, async (req, res) => {
@@ -591,6 +757,71 @@ app.post('/api/potm/test-discord-webhook', verifySession, async (req, res) => {
 });
 
 // ─── API: Generate Bundle ─────────────────────────────────────────────────────
+
+app.get('/api/chaos/pending-orders', verifySession, async (req, res) => {
+  try {
+    const shop = req.shopifySession.shop;
+    const settings = await getSettings(shop);
+
+    if (!settings.chaos_club_product_id) {
+      return res.json({ orders: [] });
+    }
+
+    const processedOrderIds = new Set(await getProcessedChaosOrderIds(shop));
+    const orders = await buildPendingChaosClubOrders(req.shopifySession, settings.chaos_club_product_id, processedOrderIds);
+    res.json({ orders });
+  } catch (err) {
+    console.error('Error fetching pending Chaos Club orders:', err.message);
+    res.status(500).json({ error: 'Failed to fetch pending Chaos Club orders' });
+  }
+});
+
+app.post('/api/chaos/pending-orders/process-next', verifySession, async (req, res) => {
+  try {
+    const shop = req.shopifySession.shop;
+    const settings = await getSettings(shop);
+
+    if (!settings.chaos_club_product_id) {
+      return res.status(400).json({ error: 'Set the Chaos Club product ID in Settings first.' });
+    }
+
+    const processedOrderIds = new Set(await getProcessedChaosOrderIds(shop));
+    const [nextPendingOrder] = await buildPendingChaosClubOrders(req.shopifySession, settings.chaos_club_product_id, processedOrderIds);
+    if (!nextPendingOrder) {
+      return res.status(404).json({ error: 'No pending Chaos Club orders found.' });
+    }
+
+    const client = new shopify.clients.Rest({ session: req.shopifySession });
+    const response = await client.get({
+      path: `orders/${nextPendingOrder.id}`,
+      query: {
+        fields: 'id,name,created_at,processed_at,cancelled_at,financial_status,customer,line_items',
+      },
+    });
+
+    const order = response.body.order;
+    const processed = await processChaosClubOrder({
+      shop,
+      session: req.shopifySession,
+      settings,
+      order,
+      dryRun: false,
+    });
+
+    res.json({
+      success: true,
+      alreadyProcessed: processed.alreadyProcessed,
+      order: nextPendingOrder,
+      bundle: processed.history,
+      message: processed.alreadyProcessed
+        ? `${nextPendingOrder.name} was already processed.`
+        : `${nextPendingOrder.name} processed successfully.`,
+    });
+  } catch (err) {
+    console.error('Error processing next pending Chaos Club order:', err.message);
+    res.status(500).json({ error: 'Failed to process next pending Chaos Club order: ' + err.message });
+  }
+});
 
 app.post('/api/generate', verifySession, async (req, res) => {
   try {
@@ -1489,64 +1720,19 @@ app.post('/webhooks/orders-paid', async (req, res) => {
       const session = await sessionStorage.loadSession(`offline_${shop}`);
       if (!session) { console.error('No session found for shop', shop); return; }
 
-      const subscriber = order.customer?.id
-        ? await getSubscriberByCustomerId(shop, String(order.customer.id))
-        : null;
-
-      // Detect pack count from variant title (e.g. "6 Pack", "6-Pack") first,
-      // then fall back to the subscriber's stored pack_count, then default 3
-      const variantTitle = chaosItem.variant_title || '';
-      const variantNum = parseInt(variantTitle.match(/\b(3|6|9|12)\b/)?.[1] || '0', 10);
-      const packCount = ([3,6,9,12].includes(variantNum) ? variantNum : null)
-        || subscriber?.pack_count
-        || 3;
-      console.log(`📦 Pack count resolved: ${packCount} (variant: "${variantTitle}", subscriber: ${subscriber?.pack_count ?? 'n/a'})`);
-
-      const { regular, collector } = await fetchBundleProducts(
-        new shopify.clients.Graphql({ session }),
-        settings.regular_pack_ids || [],
-        settings.collector_pack_ids || []
-      );
-
-      if (!regular.length) { console.warn('No regular packs configured — skipping auto-generation'); return; }
-
-      const result = generateSubscriptionBundle(regular, collector, packCount, settings, {
-        enabled: true,
-        lastUpgradeDate: subscriber?.last_upgrade_date || null,
+      const processed = await processChaosClubOrder({
+        shop,
+        session,
+        settings,
+        order,
+        dryRun: false,
       });
 
-      if (!result) { console.warn('Could not generate auto bundle for', order.name); return; }
-
-      await updateInventory(shopify, session, result.packs, false);
-
-      const d20 = result.d20Result;
-      const saved = await saveBundleHistory(shop, {
-        subscriber_id: subscriber?.id || null,
-        bundle_type: 'Chaos Club',
-        customer_name: order.customer ? `${order.customer.first_name} ${order.customer.last_name}`.trim() : 'Subscriber',
-        pack_count: result.packs.length,
-        total_cost: result.metrics.total_cost,
-        total_retail: result.metrics.total_retail,
-        target_price: result.metrics.target_price,
-        margin_percent: result.metrics.margin_percent,
-        d20_roll: d20?.roll || null,
-        d20_upgraded: d20?.upgraded || false,
-        packs: result.packs,
-        dry_run: false,
-      });
-
-      if (subscriber) {
-        await updateSubscriber(shop, subscriber.id, {
-          ...subscriber,
-          months_renewed: (subscriber.months_renewed || 0) + 1,
-          ...(d20?.upgraded ? {
-            collector_upgrade_count: (subscriber.collector_upgrade_count || 0) + 1,
-            last_upgrade_date: new Date().toISOString().slice(0, 10),
-          } : {}),
-        });
+      if (processed.alreadyProcessed) {
+        console.log(`ℹ️ Chaos Club order ${order.name} already processed as bundle #${processed.history.id}`);
+      } else {
+        console.log(`✅ Auto-generated bundle #${processed.history.id} for Order ${order.name} (${processed.result.d20Result?.upgraded ? '🎲 D20 upgrade!' : 'no upgrade'})`);
       }
-
-      console.log(`✅ Auto-generated bundle #${saved.id} for Order ${order.name} (${d20?.upgraded ? '🎲 D20 upgrade!' : 'no upgrade'})`);
     }
 
     // ── Pack of the Month branch ───────────────────────────────────────────

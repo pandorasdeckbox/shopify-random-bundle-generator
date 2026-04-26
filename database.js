@@ -91,6 +91,8 @@ async function setupPostgresTables() {
       id SERIAL PRIMARY KEY,
       shop TEXT NOT NULL,
       subscriber_id INTEGER REFERENCES chaos_subscribers(id) ON DELETE SET NULL,
+      shopify_order_id TEXT,
+      shopify_order_name TEXT,
       bundle_type TEXT NOT NULL,
       customer_name TEXT,
       pack_count INTEGER,
@@ -105,6 +107,9 @@ async function setupPostgresTables() {
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
+
+  await ensurePostgresColumn('bundle_history', 'shopify_order_id', 'TEXT');
+  await ensurePostgresColumn('bundle_history', 'shopify_order_name', 'TEXT');
 
   await pgPool.query(`
     CREATE TABLE IF NOT EXISTS docx_templates (
@@ -188,6 +193,8 @@ function setupSQLiteTables() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       shop TEXT NOT NULL,
       subscriber_id INTEGER,
+      shopify_order_id TEXT,
+      shopify_order_name TEXT,
       bundle_type TEXT NOT NULL,
       customer_name TEXT,
       pack_count INTEGER,
@@ -201,6 +208,8 @@ function setupSQLiteTables() {
       dry_run INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Added later for pending Chaos Club order tracking
 
     CREATE TABLE IF NOT EXISTS docx_templates (
       shop TEXT PRIMARY KEY,
@@ -245,6 +254,8 @@ function setupSQLiteTables() {
     );
   `);
 
+  ensureSQLiteColumn('bundle_history', 'shopify_order_id', 'TEXT');
+  ensureSQLiteColumn('bundle_history', 'shopify_order_name', 'TEXT');
   ensureSQLiteColumn('potm_subscribers', 'last_renewal_date', 'TEXT');
 }
 
@@ -418,9 +429,11 @@ export async function deleteSubscriber(shop, id) {
 // ─── Bundle History ───────────────────────────────────────────────────────────
 
 export async function saveBundleHistory(shop, data) {
-  const cols = ['subscriber_id', 'bundle_type', 'customer_name', 'pack_count', 'total_cost', 'total_retail', 'target_price', 'margin_percent', 'd20_roll', 'd20_upgraded', 'packs_json', 'dry_run'];
+  const cols = ['subscriber_id', 'shopify_order_id', 'shopify_order_name', 'bundle_type', 'customer_name', 'pack_count', 'total_cost', 'total_retail', 'target_price', 'margin_percent', 'd20_roll', 'd20_upgraded', 'packs_json', 'dry_run'];
   const vals = [
     data.subscriber_id || null,
+    data.shopify_order_id || null,
+    data.shopify_order_name || null,
     data.bundle_type,
     data.customer_name || null,
     data.pack_count || null,
@@ -477,6 +490,38 @@ export async function getBundleById(shop, id) {
     return result.rows[0] || null;
   } else {
     return sqliteDb.prepare('SELECT * FROM bundle_history WHERE shop = ? AND id = ?').get(shop, id) || null;
+  }
+}
+
+export async function getBundleByShopifyOrderId(shop, shopifyOrderId) {
+  if (pgPool) {
+    const result = await pgPool.query(
+      'SELECT * FROM bundle_history WHERE shop = $1 AND shopify_order_id = $2 AND dry_run = FALSE ORDER BY created_at DESC LIMIT 1',
+      [shop, shopifyOrderId]
+    );
+    return result.rows[0] || null;
+  } else {
+    return sqliteDb.prepare(
+      'SELECT * FROM bundle_history WHERE shop = ? AND shopify_order_id = ? AND dry_run = 0 ORDER BY created_at DESC LIMIT 1'
+    ).get(shop, shopifyOrderId) || null;
+  }
+}
+
+export async function getProcessedChaosOrderIds(shop) {
+  if (pgPool) {
+    const result = await pgPool.query(
+      `SELECT shopify_order_id
+       FROM bundle_history
+       WHERE shop = $1 AND bundle_type = $2 AND dry_run = FALSE AND shopify_order_id IS NOT NULL`,
+      [shop, 'Chaos Club']
+    );
+    return result.rows.map(row => String(row.shopify_order_id));
+  } else {
+    return sqliteDb.prepare(
+      `SELECT shopify_order_id
+       FROM bundle_history
+       WHERE shop = ? AND bundle_type = ? AND dry_run = 0 AND shopify_order_id IS NOT NULL`
+    ).all(shop, 'Chaos Club').map(row => String(row.shopify_order_id));
   }
 }
 

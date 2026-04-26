@@ -336,6 +336,41 @@
   <div id="tab-generate" class="tab-panel active">
 
     <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+        <div>
+          <h2 style="margin-bottom:6px;">Pending Chaos Club Orders</h2>
+          <p style="color:var(--muted);font-size:0.88rem;max-width:780px;">
+            Paid Chaos Club orders that have not been processed into bundle history yet. Use this queue to handle the oldest outstanding order first.
+          </p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="process-next-chaos-btn" class="btn btn-primary" type="button" onclick="processNextPendingChaosOrder()">Process Next Pending Chaos Club Order</button>
+          <button class="btn btn-secondary" type="button" onclick="loadPendingChaosOrders()">↺ Refresh Queue</button>
+        </div>
+      </div>
+
+      <div id="pending-chaos-alert"></div>
+      <div id="pending-chaos-loading" class="loading" style="display:none;"><span class="spinner"></span></div>
+      <div id="pending-chaos-summary" style="display:none;margin-bottom:12px;"></div>
+      <div id="pending-chaos-empty" style="display:none;color:var(--muted);padding:12px 0;"></div>
+
+      <div id="pending-chaos-table-wrap" class="table-wrap" style="display:none;">
+        <table>
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Customer</th>
+              <th>Packs</th>
+              <th>Paid</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="pending-chaos-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Bundle Configuration</h2>
 
       <!-- Bundle Type -->
@@ -1001,6 +1036,7 @@ let allCollections = [];
 let currentSettings = {};
 let subscribers = [];
 let importProductList = [];
+let pendingChaosOrders = [];
 
 // Parse "YYYY-MM-DD" as local midnight (avoids UTC-shift bug)
 function localDate(str) {
@@ -1025,6 +1061,7 @@ async function init() {
   }
   await Promise.all([loadShopInfo(), loadSettings()]);
   loadSubscribersForDropdown();
+  loadPendingChaosOrders();
 }
 
 async function loadShopInfo() {
@@ -1043,6 +1080,7 @@ function switchTab(name) {
   document.getElementById('tab-' + name).classList.add('active');
   event.target.classList.add('active');
 
+  if (name === 'generate') loadPendingChaosOrders();
   if (name === 'products' && !allProducts.length) loadProducts();
   if (name === 'subscribers') loadSubscribers();
   if (name === 'history') loadHistory();
@@ -1077,6 +1115,88 @@ function showAlert(containerId, msg, type = 'error') {
   if (!el) return;
   el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
   setTimeout(() => { if (el) el.innerHTML = ''; }, 6000);
+}
+
+async function loadPendingChaosOrders() {
+  const loading = document.getElementById('pending-chaos-loading');
+  if (loading) loading.style.display = 'block';
+
+  try {
+    const { orders } = await api('/api/chaos/pending-orders');
+    pendingChaosOrders = orders || [];
+    renderPendingChaosOrders(pendingChaosOrders);
+  } catch (e) {
+    showAlert('pending-chaos-alert', 'Failed to load pending Chaos Club orders: ' + e.message);
+  } finally {
+    if (loading) loading.style.display = 'none';
+  }
+}
+
+function renderPendingChaosOrders(orders) {
+  const summary = document.getElementById('pending-chaos-summary');
+  const empty = document.getElementById('pending-chaos-empty');
+  const tableWrap = document.getElementById('pending-chaos-table-wrap');
+  const tbody = document.getElementById('pending-chaos-tbody');
+  const processBtn = document.getElementById('process-next-chaos-btn');
+
+  if (!orders.length) {
+    summary.style.display = 'none';
+    tableWrap.style.display = 'none';
+    empty.style.display = 'block';
+    empty.textContent = currentSettings?.chaos_club_product_id
+      ? 'No pending paid Chaos Club orders right now.'
+      : 'Set the Chaos Club product ID in Settings to load the queue.';
+    processBtn.disabled = true;
+    return;
+  }
+
+  const next = orders[0];
+  summary.style.display = 'block';
+  summary.innerHTML = `
+    <div class="alert alert-info" style="margin-bottom:0;">
+      <strong>${orders.length}</strong> pending Chaos Club order${orders.length !== 1 ? 's' : ''}. Next up: <strong>${escapeHtml(next.name)}</strong> for <strong>${escapeHtml(next.customer_name)}</strong>.
+    </div>`;
+  empty.style.display = 'none';
+  tableWrap.style.display = 'block';
+  processBtn.disabled = false;
+
+  tbody.innerHTML = orders.map((order, index) => {
+    const paidDate = order.processed_at ? new Date(order.processed_at).toLocaleDateString() : (order.created_at ? new Date(order.created_at).toLocaleDateString() : '—');
+    const statusText = index === 0 ? '<span class="badge badge-yellow">Next</span>' : '<span class="badge badge-blue">Queued</span>';
+    return `<tr>
+      <td><strong>${escapeHtml(order.name)}</strong></td>
+      <td>${escapeHtml(order.customer_name)}${order.customer_email ? `<br><span style="color:var(--muted);font-size:0.78rem">${escapeHtml(order.customer_email)}</span>` : ''}</td>
+      <td>${order.pack_count || '—'}</td>
+      <td>${paidDate}</td>
+      <td>${statusText}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function processNextPendingChaosOrder() {
+  const next = pendingChaosOrders[0];
+  if (!next) {
+    await loadPendingChaosOrders();
+    if (!pendingChaosOrders[0]) return;
+  }
+
+  const target = pendingChaosOrders[0];
+  if (!confirm(`Process ${target.name} for ${target.customer_name}? This will generate a live Chaos Club bundle and decrement inventory.`)) return;
+
+  const btn = document.getElementById('process-next-chaos-btn');
+  btn.disabled = true;
+  btn.textContent = 'Processing…';
+
+  try {
+    const result = await api('/api/chaos/pending-orders/process-next', { method: 'POST', body: {} });
+    showAlert('pending-chaos-alert', `✅ ${result.message}`, 'success');
+    await Promise.all([loadPendingChaosOrders(), loadHistory(), loadSubscribersForDropdown()]);
+  } catch (e) {
+    showAlert('pending-chaos-alert', 'Failed to process pending Chaos Club order: ' + e.message);
+  } finally {
+    btn.disabled = pendingChaosOrders.length === 0;
+    btn.textContent = 'Process Next Pending Chaos Club Order';
+  }
 }
 
 // ─── Generate Tab ─────────────────────────────────────────────────────────────
