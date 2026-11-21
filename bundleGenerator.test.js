@@ -79,7 +79,7 @@ test('generates 24 Advent packs with two guaranteed packs regardless of their st
   const result = generateAdventBundle(regular, collector, {
     advent_price: 249,
     advent_min_margin_percent: 30,
-    advent_ideal_margin_percent: 30,
+    advent_ideal_margin_percent: 50,
   }, guaranteed);
 
   assert.equal(result.packs.length, 24);
@@ -91,6 +91,67 @@ test('generates 24 Advent packs with two guaranteed packs regardless of their st
   assert.equal(result.metrics.total_retail, 199);
   assert.equal(Math.round(result.metrics.total_cost * 100) / 100, 58.24);
   assert.ok(result.metrics.margin_percent >= 30);
+});
+
+test('evaluates later candidates toward the Advent ideal margin', () => {
+  const regular = [
+    ...Array.from({ length: 21 }, (_, index) => ({
+      id: `regular-${index}`,
+      product_title: `Regular ${index + 1}`,
+      price: 5,
+      cost: 1,
+      inventory_quantity: 1,
+      inventory_item_id: `regular-item-${index}`,
+      is_collector: false,
+    })),
+    {
+      id: 'high-cost',
+      product_title: 'High-cost pack',
+      price: 5,
+      cost: 10,
+      inventory_quantity: 1,
+      inventory_item_id: 'high-cost-item',
+      is_collector: false,
+    },
+  ];
+  const collector = [{
+    id: 'collector',
+    product_title: 'Collector pack',
+    price: 40,
+    cost: 1,
+    inventory_quantity: 1,
+    inventory_item_id: 'collector-item',
+    is_collector: true,
+  }];
+  const guaranteed = ADVENT_GUARANTEED_PACKS.map((pack, index) => ({
+    id: `guaranteed-${index}`,
+    product_id: pack.productId,
+    product_title: `Guaranteed ${index + 1}`,
+    price: pack.price,
+    cost: pack.cost,
+    inventory_quantity: 1,
+    inventory_item_id: `guaranteed-item-${index}`,
+    is_collector: false,
+    is_guaranteed: true,
+  }));
+  const originalRandom = Math.random;
+  let randomCalls = 0;
+  Math.random = () => (randomCalls++ < 22 ? 0 : 0.999999);
+
+  let result;
+  try {
+    result = generateAdventBundle(regular, collector, {
+      advent_price: 249,
+      advent_min_margin_percent: 30,
+      advent_ideal_margin_percent: 50,
+    }, guaranteed);
+  } finally {
+    Math.random = originalRandom;
+  }
+
+  assert.ok(result);
+  assert.ok(result.metrics.margin_percent > 50);
+  assert.ok(!result.packs.some(pack => pack.id === 'high-cost'));
 });
 
 test('refuses to generate an Advent bundle below the minimum margin', () => {
@@ -127,7 +188,7 @@ test('refuses to generate an Advent bundle below the minimum margin', () => {
   const result = generateAdventBundle(regular, collector, {
     advent_price: 249,
     advent_min_margin_percent: 30,
-    advent_ideal_margin_percent: 30,
+    advent_ideal_margin_percent: 50,
   }, guaranteed);
 
   assert.equal(result, null);

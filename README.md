@@ -102,7 +102,7 @@ Once installed, the app UI should open automatically. If not, visit:
 **Settings tab:**
 - Set subscription prices for 3 / 6 / 9 / 12-pack tiers
 - Set the Advent Calendar price (default $249) and Draft Kit price
-- Advent Calendars require a 30% minimum margin; generation fails if no eligible bundle can meet it
+- Advent Calendars use a 30% minimum margin and 50% ideal margin by default; generation fails if no eligible bundle meets the minimum
 - Set margin targets (default 40%)
 - Find your **Chaos Club Product** — go to the product in Shopify admin, look at the URL for the numeric ID (e.g. `1234567890`), enter it as `gid://shopify/Product/1234567890`
 - Click **Register Webhook** — this lets the app auto-generate bundles when subscriptions renew
@@ -182,7 +182,7 @@ Bundles are scored on:
 1. **Margin proximity** — how close the total cost gets to the target margin (ideal margin earns max points, over-margin is slightly rewarded, under-minimum is penalized)
 2. **Variety bonus** — points added for having packs spread across different price buckets (`unique price tiers × 3`)
 
-Up to 200 attempts are made per bundle (300 for Advent) and the best-scoring result is returned. Generation exits early once the minimum margin threshold is first met.
+Up to 200 attempts are made per bundle (300 for Advent). Advent evaluates all 300 candidates and returns the highest-scoring bundle that meets its minimum margin; generation fails if none qualify.
 
 ### Auto-Webhook
 When an `orders/paid` webhook fires:

@@ -311,7 +311,7 @@ export function getDefaultSettings() {
     min_margin_percent: 10,
     ideal_margin_percent: 20,
     advent_min_margin_percent: 30,
-    advent_ideal_margin_percent: 30,
+    advent_ideal_margin_percent: 50,
     chaos_draft_price: 120,
     advent_price: 249,
     collector_upgrade_max_price: 50,
