@@ -310,8 +310,8 @@ export function getDefaultSettings() {
     shipping_cost: 8,
     min_margin_percent: 10,
     ideal_margin_percent: 20,
-    advent_min_margin_percent: 15,
-    advent_ideal_margin_percent: 25,
+    advent_min_margin_percent: 30,
+    advent_ideal_margin_percent: 30,
     chaos_draft_price: 120,
     advent_price: 249,
     collector_upgrade_max_price: 50,
@@ -322,14 +322,26 @@ export function getDefaultSettings() {
 }
 
 const ADVENT_PRICE_MIGRATION_KEY = 'advent_price_migrated_2026';
+const ADVENT_MARGIN_MIGRATION_KEY = 'advent_margin_migrated_2026';
 
-async function applyAdventPriceMigration(shop, savedSettings) {
+async function applyAdventSettingsMigrations(shop, savedSettings) {
   const settings = { ...getDefaultSettings(), ...savedSettings };
+  let changed = false;
+
   if (!savedSettings[ADVENT_PRICE_MIGRATION_KEY]) {
     if (Number(savedSettings.advent_price) === 199) settings.advent_price = 249;
     settings[ADVENT_PRICE_MIGRATION_KEY] = true;
-    await saveSettings(shop, settings);
+    changed = true;
   }
+
+  if (!savedSettings[ADVENT_MARGIN_MIGRATION_KEY]) {
+    if (Number(savedSettings.advent_min_margin_percent) === 15) settings.advent_min_margin_percent = 30;
+    if (Number(savedSettings.advent_ideal_margin_percent) === 25) settings.advent_ideal_margin_percent = 30;
+    settings[ADVENT_MARGIN_MIGRATION_KEY] = true;
+    changed = true;
+  }
+
+  if (changed) await saveSettings(shop, settings);
   return settings;
 }
 
@@ -337,11 +349,11 @@ export async function getSettings(shop) {
   if (pgPool) {
     const result = await pgPool.query('SELECT settings_json FROM app_settings WHERE shop = $1', [shop]);
     return result.rows.length
-      ? applyAdventPriceMigration(shop, JSON.parse(result.rows[0].settings_json))
+      ? applyAdventSettingsMigrations(shop, JSON.parse(result.rows[0].settings_json))
       : getDefaultSettings();
   } else {
     const row = sqliteDb.prepare('SELECT settings_json FROM app_settings WHERE shop = ?').get(shop);
-    return row ? applyAdventPriceMigration(shop, JSON.parse(row.settings_json)) : getDefaultSettings();
+    return row ? applyAdventSettingsMigrations(shop, JSON.parse(row.settings_json)) : getDefaultSettings();
   }
 }
 

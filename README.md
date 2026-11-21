@@ -102,6 +102,7 @@ Once installed, the app UI should open automatically. If not, visit:
 **Settings tab:**
 - Set subscription prices for 3 / 6 / 9 / 12-pack tiers
 - Set the Advent Calendar price (default $249) and Draft Kit price
+- Advent Calendars require a 30% minimum margin; generation fails if no eligible bundle can meet it
 - Set margin targets (default 40%)
 - Find your **Chaos Club Product** — go to the product in Shopify admin, look at the URL for the numeric ID (e.g. `1234567890`), enter it as `gid://shopify/Product/1234567890`
 - Click **Register Webhook** — this lets the app auto-generate bundles when subscriptions renew

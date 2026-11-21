@@ -397,8 +397,8 @@ export function generateAdventBundle(regularPacks, collectorPacks, settings, gua
   if (!guaranteedPacks || guaranteedPacks.length !== 2) return null;
 
   const targetPrice = settings.advent_price || 249;
-  const minMargin = settings.advent_min_margin_percent || 15;
-  const idealMargin = settings.advent_ideal_margin_percent || 25;
+  const minMargin = settings.advent_min_margin_percent || 30;
+  const idealMargin = settings.advent_ideal_margin_percent || 30;
   const excludeKeywords = settings.excluded_collector_keywords || ['omega', 'display', 'japanese'];
 
   const availableRegular = regularPacks.filter(p => p.inventory_quantity > 0);
@@ -412,6 +412,7 @@ export function generateAdventBundle(regularPacks, collectorPacks, settings, gua
 
   let bestBundle = null;
   let bestScore = -Infinity;
+  let bestMargin = -Infinity;
 
   for (let i = 0; i < 300; i++) {
     const collector = availableCollector[Math.floor(Math.random() * availableCollector.length)];
@@ -440,11 +441,12 @@ export function generateAdventBundle(regularPacks, collectorPacks, settings, gua
     if (score > bestScore) {
       bestScore = score;
       bestBundle = selected;
+      bestMargin = marginPercent;
     }
     if (marginPercent >= minMargin) break;
   }
 
-  if (!bestBundle) return null;
+  if (!bestBundle || bestMargin < minMargin) return null;
 
   const totalCost = bestBundle.reduce((s, p) => s + p.cost, 0);
   const totalRetail = bestBundle.reduce((s, p) => s + p.price, 0);
