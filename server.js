@@ -4,7 +4,7 @@
  * Generates randomized MTG booster pack bundles for:
  *   - Chaos Club subscriptions (3/6/9/12 packs + D20 upgrade system)
  *   - Chaos Draft Kits (12 regular + 1 collector)
- *   - Advent Calendars (23 regular + 1 collector)
+ *   - Advent Calendars (21 regular + 2 guaranteed + 1 collector)
  *
  * Authentication: Custom OAuth (bypasses iframe cookie restrictions)
  * Storage: PostgreSQL (Railway prod) / SQLite (local dev)
@@ -53,6 +53,7 @@ import {
 import {
   fetchAllProducts,
   fetchBundleProducts,
+  ADVENT_GUARANTEED_PACKS,
   fetchCollections,
   generateSubscriptionBundle,
   generateAdventBundle,
@@ -875,10 +876,12 @@ app.post('/api/generate', verifySession, async (req, res) => {
     }
 
     // Fetch products with costs
-    const { regular, collector } = await fetchBundleProducts(
+    const guaranteedPackConfigs = bundle_type === 'advent' ? ADVENT_GUARANTEED_PACKS : [];
+    const { regular, collector, guaranteed } = await fetchBundleProducts(
       new shopify.clients.Graphql({ session: req.shopifySession }),
       settings.regular_pack_ids || [],
-      settings.collector_pack_ids || []
+      settings.collector_pack_ids || [],
+      guaranteedPackConfigs
     );
 
     if (!regular.length) {
@@ -895,7 +898,7 @@ app.post('/api/generate', verifySession, async (req, res) => {
         lastUpgradeDate: resolvedLastUpgrade || null,
       });
     } else if (bundle_type === 'advent') {
-      result = generateAdventBundle(regular, collector, settings);
+      result = generateAdventBundle(regular, collector, settings, guaranteed);
     } else if (bundle_type === 'draft_kit') {
       result = generateDraftKitBundle(regular, collector, settings);
     } else {

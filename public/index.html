@@ -1388,8 +1388,8 @@ function renderResult(r) {
     const name = p.product_title + (p.variant_title ? ` – ${p.variant_title}` : '');
     return `<li class="pack-item">
       <span class="pack-num">${i + 1}.</span>
-      <span class="pack-name" ${p.is_collector ? 'style="font-weight:600"' : ''}>${name}</span>
-      ${p.is_collector ? '<span class="pack-collector">⭐ COLLECTOR</span>' : ''}
+      <span class="pack-name" ${p.is_collector || p.is_guaranteed ? 'style="font-weight:600"' : ''}>${name}</span>
+      ${p.is_collector ? '<span class="pack-collector">⭐ COLLECTOR</span>' : p.is_guaranteed ? '<span class="pack-collector">✓ GUARANTEED</span>' : ''}
       <span class="pack-price">$${p.price.toFixed(2)}</span>
     </li>`;
   }).join('');
@@ -1567,7 +1567,7 @@ async function loadSettings() {
     document.getElementById('s-price-6').value = (s.subscription_pricing || {})[6] || 43;
     document.getElementById('s-price-9').value = (s.subscription_pricing || {})[9] || 59;
     document.getElementById('s-price-12').value = (s.subscription_pricing || {})[12] || 74;
-    document.getElementById('s-advent-price').value = s.advent_price || 199;
+    document.getElementById('s-advent-price').value = s.advent_price || 249;
     document.getElementById('s-draft-price').value = s.chaos_draft_price || 120;
     document.getElementById('s-min-margin').value = s.min_margin_percent || 10;
     document.getElementById('s-ideal-margin').value = s.ideal_margin_percent || 20;

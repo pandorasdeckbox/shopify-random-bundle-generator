@@ -190,7 +190,9 @@ export async function generateBundleDocx(bundleData, customerName = 'Walk-in', b
   for (let i = 0; i < orderedPacks.length; i++) {
     const pack = orderedPacks[i];
     const fullName = pack.product_title + (pack.variant_title ? ` – ${pack.variant_title}` : '');
-    const displayName = pack.is_collector ? `⭐ ${fullName}  [COLLECTOR]` : fullName;
+    const displayName = pack.is_collector
+      ? `⭐ ${fullName}  [COLLECTOR]`
+      : pack.is_guaranteed ? `${fullName}  [GUARANTEED]` : fullName;
     const shade = i % 2 === 0 ? 'f9f9f9' : 'ffffff';
 
     packRows.push(new TableRow({
@@ -329,7 +331,7 @@ export async function generateBundleDocxFromTemplate(templateBuffer, bundleData,
     packs: orderedPacks.map((p, i) => ({
       pack_num: String(i + 1),
       pack_name: p.product_title + (p.variant_title ? ` – ${p.variant_title}` : ''),
-      pack_type: p.is_collector ? 'COLLECTOR' : '',
+      pack_type: p.is_collector ? 'COLLECTOR' : p.is_guaranteed ? 'GUARANTEED' : '',
       pack_price: `$${p.price.toFixed(2)}`,
     })),
   });

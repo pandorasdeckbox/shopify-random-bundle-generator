@@ -4,7 +4,7 @@ Embedded Shopify app for Pandora's Deck Box. Generates randomized MTG booster pa
 
 - **Chaos Club** — 3 / 6 / 9 / 12 pack subscriptions with D20 collector upgrade system
 - **Chaos Draft Kit** — 12 regular + 1 collector pack
-- **Advent Calendar** — 23 regular + 1 collector pack
+- **Advent Calendar** — 21 random regular + 2 guaranteed rare + 1 collector pack (24 total; $249 default)
 - **Pack of the Month** — monthly single-pack subscriptions with collector upgrade milestones
 
 Outputs a printable DOCX packing slip, tracks Chaos Club subscribers, and can auto-generate bundles when subscription orders are paid via webhook.
@@ -101,7 +101,7 @@ Once installed, the app UI should open automatically. If not, visit:
 
 **Settings tab:**
 - Set subscription prices for 3 / 6 / 9 / 12-pack tiers
-- Set Advent Calendar and Draft Kit prices
+- Set the Advent Calendar price (default $249) and Draft Kit price
 - Set margin targets (default 40%)
 - Find your **Chaos Club Product** — go to the product in Shopify admin, look at the URL for the numeric ID (e.g. `1234567890`), enter it as `gid://shopify/Product/1234567890`
 - Click **Register Webhook** — this lets the app auto-generate bundles when subscriptions renew

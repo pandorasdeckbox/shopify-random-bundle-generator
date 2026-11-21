@@ -313,7 +313,7 @@ export function getDefaultSettings() {
     advent_min_margin_percent: 15,
     advent_ideal_margin_percent: 25,
     chaos_draft_price: 120,
-    advent_price: 199,
+    advent_price: 249,
     collector_upgrade_max_price: 50,
     luck_protection_months: 12,
     draft_suitable_exclude_keywords: ['beyond', 'aftermath'],
@@ -321,13 +321,27 @@ export function getDefaultSettings() {
   };
 }
 
+const ADVENT_PRICE_MIGRATION_KEY = 'advent_price_migrated_2026';
+
+async function applyAdventPriceMigration(shop, savedSettings) {
+  const settings = { ...getDefaultSettings(), ...savedSettings };
+  if (!savedSettings[ADVENT_PRICE_MIGRATION_KEY]) {
+    if (Number(savedSettings.advent_price) === 199) settings.advent_price = 249;
+    settings[ADVENT_PRICE_MIGRATION_KEY] = true;
+    await saveSettings(shop, settings);
+  }
+  return settings;
+}
+
 export async function getSettings(shop) {
   if (pgPool) {
     const result = await pgPool.query('SELECT settings_json FROM app_settings WHERE shop = $1', [shop]);
-    return result.rows.length ? { ...getDefaultSettings(), ...JSON.parse(result.rows[0].settings_json) } : getDefaultSettings();
+    return result.rows.length
+      ? applyAdventPriceMigration(shop, JSON.parse(result.rows[0].settings_json))
+      : getDefaultSettings();
   } else {
     const row = sqliteDb.prepare('SELECT settings_json FROM app_settings WHERE shop = ?').get(shop);
-    return row ? { ...getDefaultSettings(), ...JSON.parse(row.settings_json) } : getDefaultSettings();
+    return row ? applyAdventPriceMigration(shop, JSON.parse(row.settings_json)) : getDefaultSettings();
   }
 }
 

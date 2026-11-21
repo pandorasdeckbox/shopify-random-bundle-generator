@@ -40,6 +40,21 @@ export function gidToNumeric(gid) {
 
 // ─── Product Fetching ─────────────────────────────────────────────────────────
 
+export const ADVENT_GUARANTEED_PACKS = [
+  {
+    productId: 'gid://shopify/Product/10447683289153',
+    sku: '714891FIXED',
+    price: 29,
+    cost: 21.17,
+  },
+  {
+    productId: 'gid://shopify/Product/10392557092929',
+    sku: '709720FIXED',
+    price: 25,
+    cost: 11.07,
+  },
+];
+
 /**
  * Fetch all products for the configuration UI (paginated, no cost data needed)
  */
@@ -129,9 +144,14 @@ export async function fetchCollections(client) {
  * Fetch selected products (by GID) WITH cost data — used at bundle generation time.
  * Uses the efficient GraphQL nodes() query to get all data in one request.
  */
-export async function fetchBundleProducts(client, regularIds, collectorIds) {
-  const allIds = [...new Set([...regularIds, ...collectorIds])];
-  if (!allIds.length) return { regular: [], collector: [] };
+export async function fetchBundleProducts(client, regularIds, collectorIds, guaranteedPackConfigs = []) {
+  const guaranteedById = new Map(guaranteedPackConfigs.map(pack => [pack.productId, pack]));
+  const allIds = [...new Set([
+    ...regularIds,
+    ...collectorIds,
+    ...guaranteedPackConfigs.map(pack => pack.productId),
+  ])];
+  if (!allIds.length) return { regular: [], collector: [], guaranteed: [] };
 
   const query = `
     query GetNodes($ids: [ID!]!) {
@@ -145,6 +165,7 @@ export async function fetchBundleProducts(client, regularIds, collectorIds) {
             nodes {
               id
               title
+              sku
               price
               inventoryQuantity
               inventoryItem {
@@ -163,9 +184,35 @@ export async function fetchBundleProducts(client, regularIds, collectorIds) {
 
   const regular = [];
   const collector = [];
+  const guaranteed = [];
 
   for (const product of nodes) {
-    if (!product || product.status !== 'ACTIVE') continue;
+    if (!product) continue;
+
+    const guaranteedConfig = guaranteedById.get(product.id);
+    if (!guaranteedConfig && product.status !== 'ACTIVE') continue;
+
+    if (guaranteedConfig) {
+      const variant = product.variants.nodes.find(v => v.sku === guaranteedConfig.sku);
+      if (!variant?.inventoryItem?.id) {
+        throw new Error(`Could not resolve guaranteed Advent pack SKU ${guaranteedConfig.sku} on ${product.id}.`);
+      }
+
+      guaranteed.push({
+        id: variant.id,
+        product_id: product.id,
+        product_title: product.title,
+        variant_title: variant.title === 'Default Title' ? '' : variant.title,
+        sku: guaranteedConfig.sku,
+        price: guaranteedConfig.price,
+        cost: guaranteedConfig.cost,
+        inventory_quantity: variant.inventoryQuantity,
+        inventory_item_id: variant.inventoryItem.id,
+        is_collector: false,
+        is_guaranteed: true,
+      });
+      continue;
+    }
 
     const isCollector = collectorIds.includes(product.id);
     const isRegular = regularIds.includes(product.id);
@@ -193,7 +240,14 @@ export async function fetchBundleProducts(client, regularIds, collectorIds) {
     }
   }
 
-  return { regular, collector };
+  const unresolvedGuaranteed = guaranteedPackConfigs.filter(config =>
+    !guaranteed.some(pack => pack.product_id === config.productId)
+  );
+  if (unresolvedGuaranteed.length) {
+    throw new Error(`Could not fetch guaranteed Advent pack(s): ${unresolvedGuaranteed.map(pack => pack.sku).join(', ')}.`);
+  }
+
+  return { regular, collector, guaranteed };
 }
 
 // ─── D20 Upgrade System ───────────────────────────────────────────────────────
@@ -337,10 +391,12 @@ export function generateSubscriptionBundle(regularPacks, collectorPacks, packCou
 // ─── Advent Calendar Bundle ───────────────────────────────────────────────────
 
 /**
- * Generate an Advent Calendar bundle (23 regular + 1 collector = 24 packs).
+ * Generate an Advent Calendar bundle (21 regular + 2 guaranteed + 1 collector = 24 packs).
  */
-export function generateAdventBundle(regularPacks, collectorPacks, settings) {
-  const targetPrice = settings.advent_price || 199;
+export function generateAdventBundle(regularPacks, collectorPacks, settings, guaranteedPacks) {
+  if (!guaranteedPacks || guaranteedPacks.length !== 2) return null;
+
+  const targetPrice = settings.advent_price || 249;
   const minMargin = settings.advent_min_margin_percent || 15;
   const idealMargin = settings.advent_ideal_margin_percent || 25;
   const excludeKeywords = settings.excluded_collector_keywords || ['omega', 'display', 'japanese'];
@@ -352,7 +408,7 @@ export function generateAdventBundle(regularPacks, collectorPacks, settings) {
     return !excludeKeywords.some(k => t.includes(k)) && !t.includes('aftermath');
   });
 
-  if (availableRegular.length < 23 || !availableCollector.length) return null;
+  if (availableRegular.length < 21 || !availableCollector.length) return null;
 
   let bestBundle = null;
   let bestScore = -Infinity;
@@ -368,11 +424,11 @@ export function generateAdventBundle(regularPacks, collectorPacks, settings) {
     let regular = [...randomSample(high, targetHigh), ...randomSample(low, targetLow)];
     const usedIds = new Set(regular.map(p => p.id));
     const remaining = availableRegular.filter(p => !usedIds.has(p.id));
-    regular = [...regular, ...randomSample(remaining, Math.min(23 - regular.length, remaining.length))];
+    regular = [...regular, ...randomSample(remaining, Math.min(21 - regular.length, remaining.length))];
 
-    if (regular.length !== 23) continue;
+    if (regular.length !== 21) continue;
 
-    const selected = [collector, ...regular];
+    const selected = [collector, ...guaranteedPacks, ...regular];
     const totalCost = selected.reduce((s, p) => s + p.cost, 0);
     const marginPercent = ((targetPrice - totalCost) / targetPrice) * 100;
 
