@@ -53,7 +53,6 @@ import {
 import {
   fetchAllProducts,
   fetchBundleProducts,
-  ADVENT_GUARANTEED_PACKS,
   fetchCollections,
   generateSubscriptionBundle,
   generateAdventBundle,
@@ -876,7 +875,7 @@ app.post('/api/generate', verifySession, async (req, res) => {
     }
 
     // Fetch products with costs
-    const guaranteedPackConfigs = bundle_type === 'advent' ? ADVENT_GUARANTEED_PACKS : [];
+    const guaranteedPackConfigs = bundle_type === 'advent' ? (settings.advent_guaranteed_packs || []) : [];
     const { regular, collector, guaranteed } = await fetchBundleProducts(
       new shopify.clients.Graphql({ session: req.shopifySession }),
       settings.regular_pack_ids || [],

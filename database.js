@@ -318,6 +318,20 @@ export function getDefaultSettings() {
     luck_protection_months: 12,
     draft_suitable_exclude_keywords: ['beyond', 'aftermath'],
     excluded_collector_keywords: ['omega', 'display', 'japanese'],
+    advent_guaranteed_packs: [
+      {
+        productId: 'gid://shopify/Product/10447683289153',
+        sku: '714891FIXED',
+        price: 29,
+        cost: 21.17,
+      },
+      {
+        productId: 'gid://shopify/Product/10392557092929',
+        sku: '709720FIXED',
+        price: 25,
+        cost: 11.07,
+      },
+    ],
   };
 }
 
